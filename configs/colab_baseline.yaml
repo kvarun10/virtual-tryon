@@ -1,0 +1,41 @@
+# Mode B: small-scale research baseline on Google Colab (single GPU, e.g. T4 16 GB).
+# Results from this configuration do NOT reproduce the paper's reported numbers.
+experiment:
+  name: baseline_128
+  run_mode: baseline
+  device: cuda
+
+paths:
+  drive_root: /content/drive/MyDrive/VirtualTryOn
+
+data:
+  dataset: deepfashion_multimodal
+  # Zip archives live permanently in Drive; each session extracts them to Colab's local disk.
+  archive_dir: "{datasets_dir}/DeepFashion-MultiModal/archives"
+  root: /content/data/DeepFashion-MultiModal
+  image_size: [128, 128]
+  require_parsing: true
+  require_densepose: false     # "images + parsing" download; set true after staging DensePose
+  max_samples: null
+  image_check: header
+  num_workers: 2
+
+segmentation:
+  clothing_backend: schp_lip
+  # Provisional, matches the "images + parsing" download (no DensePose). Revisit in Phase 4:
+  # annotation_densepose + body15 once DensePose is staged.
+  body_backend: schp_pascal
+  cache_outputs: true
+  allow_weight_download: false   # set true only after reading README "Pretrained weights"
+
+labels:
+  body_label_set: pascal_person_part   # must match the body backend (schp_pascal -> 7 parts)
+
+training:            # used from Phase 4 onwards
+  batch_size: 8
+  grad_accum_steps: 1
+  amp: true
+  checkpoint_every: 500
+
+model:
+  texture_corr_size: 32        # 32 x 32 correspondence for 128 px images

@@ -1,0 +1,17 @@
+# Mode C: extended training at the paper's 256 x 256 resolution.
+# Do not start this without reading docs/paper_analysis.md section 7 (compute estimates).
+_base_: colab_baseline.yaml
+
+experiment:
+  name: extended_256
+  run_mode: extended
+
+data:
+  image_size: [256, 256]
+
+training:
+  batch_size: 4
+  grad_accum_steps: 2
+
+model:
+  texture_corr_size: 64        # CoCosNet default; ~250 MiB per sample incl. backward

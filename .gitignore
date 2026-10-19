@@ -1,0 +1,56 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ipynb_checkpoints/
+.venv/
+venv/
+
+# --- Datasets (never commit; licence forbids redistribution) ---
+# Leading '/' = project root only, so src/data/ (code) is NOT ignored.
+/data/
+/datasets/
+*.zip
+*.tar
+*.tar.gz
+
+# --- Personal test photos ---
+/test_photos/
+
+# --- Model weights and checkpoints ---
+/checkpoints/
+/weights/
+*.pth
+*.pt
+*.ckpt
+*.safetensors
+*.onnx
+
+# --- Generated artefacts ---
+outputs/*
+!outputs/.gitkeep
+/cache/
+/logs/
+/runs/
+/wandb/
+*.npy
+*.npz
+
+# --- Secrets ---
+.env
+*.key
+*token*
+credentials*.json
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# --- Upload bundles ---
+/dist/
+
+# --- Copyrighted paper (Springer exclusive licence): keep locally, do not publish ---
+researchpaper.pdf

@@ -1,0 +1,18 @@
+# Runtime dependencies for the Dress-up virtual try-on project.
+#
+# PyTorch / torchvision are intentionally NOT listed: Google Colab ships a CUDA build that
+# matches its driver, and reinstalling it is slow and can break CUDA. Tested locally with
+# torch 2.6.0 (CPU); any torch >= 2.1 is expected to work.
+#
+# Most packages below are preinstalled on Colab; pip will skip them if the version fits.
+numpy>=1.24,<3
+pillow>=9.5
+opencv-python-headless>=4.8      # faithful SCHP preprocessing (cv2.warpAffine)
+scipy>=1.10                      # connected components for garment-only masks
+matplotlib>=3.7
+pyyaml>=6.0
+tqdm>=4.65
+gdown>=5.1                       # only used when you explicitly allow weight downloads
+
+# Optional backends (installed only if you select them in the config):
+# transformers>=4.40             # segformer_clothes backend (NVIDIA SegFormer licence, non-commercial)

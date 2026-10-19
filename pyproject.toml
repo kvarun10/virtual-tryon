@@ -1,0 +1,10 @@
+[project]
+name = "dressup-virtual-tryon"
+version = "0.3.0"
+description = "Research re-implementation of the Dress-up three-stage virtual try-on pipeline (Ghodhbani et al., 2023)."
+requires-python = ">=3.9"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+addopts = "-q"
