@@ -1,0 +1,29 @@
+# Smoke test: synthetic fixture, CPU-friendly, no downloads.
+# Runs anywhere (local CPU or Colab) in well under a minute.
+experiment:
+  name: smoke_test
+  run_mode: smoke
+  device: auto
+  dry_run: true
+
+paths:
+  drive_root: ./outputs/smoke_drive
+
+data:
+  dataset: synthetic
+  root: "{cache_dir}/synthetic_fixture"
+  image_size: [128, 128]
+  max_samples: 16
+  image_check: full
+  num_workers: 0
+
+segmentation:
+  # Ground-truth maps of the synthetic fixture stand in for the parsers, so no weights are needed.
+  clothing_backend: annotation_parsing
+  body_backend: annotation_densepose
+  cache_outputs: false
+
+training:
+  batch_size: 2
+  max_steps: 4
+  amp: false
