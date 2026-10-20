@@ -106,3 +106,32 @@ became top + **trousers** on a target with separated legs (the silhouette shortc
 footwear, skin) are placed plausibly. `class_fidelity` scored the skirt case as correct because the
 input also contained a few trouser pixels, so the stricter `class_area_agreement` was added afterwards.
 Per-class IoU was recorded but not printed in this run.
+
+### Warp run to 10,000 steps (Colab T4, 2026-10-20, user-reported)
+
+Resumed from step 500. GAN active from step 500 (LSGAN, λ=0.1), mixed pairing, 128 px, batch 8, AMP.
+Speed 0.24 s/step with the GAN (~40 min for 9,500 steps). The GAN stayed balanced: `d` mostly 0.05–0.3,
+`g_adv` 0.1–0.5, no collapse. Validation used the first 50 batches (400 of 1,271 images).
+
+**Metric bug found in this run (fixed, metric v2):** the reported mIoU averaged every class that appeared
+in the ground truth *or the prediction*. Classes that are never trained (hair, face, headwear, accessory)
+entered with IoU 0 as soon as a stray pixel was predicted as one of them. The reported curve peaked at
+step 3,000 and then "dropped", but that drop came from the definition, not the model. The values below
+are recomputed from the logged per-class IoUs (mean over the 7 trained classes):
+
+| Step | val CE | skin | top | outer | dress | skirt | pants | footwear | **mIoU (7, recomputed)** | reported (v1) | swap area agreement |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 1,000 | 0.216 | 0.50 | 0.61 | 0.00 | 0.63 | 0.11 | 0.71 | 0.57 | 0.447 | 0.449 | 0.743 |
+| 3,000 | 0.189 | 0.58 | 0.75 | 0.58 | 0.69 | 0.65 | 0.76 | 0.59 | 0.657 | 0.656 | 0.821 |
+| 5,000 | 0.174 | 0.63 | 0.77 | 0.60 | 0.67 | 0.69 | 0.79 | 0.61 | 0.680 | 0.475 | 0.808 |
+| 10,000 | **0.172** | 0.65 | 0.79 | 0.60 | 0.71 | 0.67 | 0.80 | 0.66 | **0.697** | 0.443 | **0.842** |
+
+Consequences: `best.pt` was selected with the v1 metric and is the **step-3,000** model; `last.pt`
+(step 10,000) is better on every trained class except outer (equal) and skirt (−0.02 vs step 5,000 only).
+Checkpoints from v1 have their best/early-stop counters reset on resume. Official v2 numbers on the
+**whole** val split still have to be produced with `evaluate_checkpoint` (notebook Section 10).
+
+Qualitative (validation grid, step 10,000): common outfits closely match the ground truth. In the swap
+test the jacket now stays a jacket and the dress stays a dress on a trousers-wearing target. The skirt
+is now kept, but is drawn split along the target's legs, and long garments are clipped short:
+a remaining partial silhouette leak from SCHP-Pascal body maps.
