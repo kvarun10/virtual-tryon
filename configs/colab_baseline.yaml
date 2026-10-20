@@ -27,6 +27,9 @@ segmentation:
   body_backend: schp_pascal
   cache_outputs: true
   allow_weight_download: false   # set true only after reading README "Pretrained weights"
+  # Precomputed SCHP-Pascal body maps for training: zip in Drive, extracted to local disk per session.
+  body_maps_local: /content/cache/body_maps
+  body_maps_archive: "{cache_dir}/body_maps_archives"
 
 labels:
   body_label_set: pascal_person_part   # must match the body backend (schp_pascal -> 7 parts)

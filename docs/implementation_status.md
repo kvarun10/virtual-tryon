@@ -54,3 +54,37 @@ What this means for Phase 4:
 3. **Neck/torso skin:** LIP has no neck class, so the neck becomes background in garment12, while DFMM
    ground truth labels it `skin`. This only affects classes that are not transferred, but parser output and ground-truth maps differ there.
 4. The left/right shoe imbalance in photo 2 has no effect, because both map to `footwear`.
+
+## Phase 4: warp network (2026-10-20)
+
+### Real-data Colab run (user-reported, before Phase 4)
+
+T4 GPU (14.6 GB), Python 3.13, PyTorch 2.11+cu130. Section 6a staged exactly the README counts
+(44,096 images / 12,701 parsing / 2 keypoint files). Section 6: 0 unparseable names, 0 corrupt
+images, 0 bad maps in the 200-file sample, item-disjoint splits 10,160 / 1,271 / 1,270, and 2,189 train items
+with ≥2 annotated views. Section 7: Stage A figure plausible. **The SCHP-LIP mIoU line was not
+reported, so parser accuracy on DFMM is still unmeasured.** Odd image sizes (165 × 750×915, one
+2574×3861) are handled by letterboxing. A full annotation check (`--annotation-sample 0`) has not been run.
+
+### Verified locally (CPU, synthetic fixture)
+
+| Check | Result |
+|---|---|
+| Paper Fig. 8 shapes at 256 px | body 512×16×16, clothes code 1024×2×2, upsampled clothes 512×16×16, 4 residual blocks |
+| Output shapes | `[B, 12, H, W]` for 64/128 px, non-square 128×64, skip modes body/dual/none, 7- and 15-channel bodies |
+| Input validation | wrong body-channel count, wrong size and impossible bottlenecks raise clear errors |
+| Losses | CE (ignore-aware, fp32), LSGAN / hinge / vanilla GAN all finite; gradients finite for every generator parameter; all-ignore batch gives a differentiable zero |
+| Triplets | self (per-class affine) and cross-view (same item, different photo); face/hair/headwear/accessory ignored; deterministic per (seed, epoch, index); swap pairs come from different items |
+| Body maps | precompute → zip → delete → restore → load (with a stand-in backend), resumable; missing maps give a clear error |
+| **Checkpoint resume** | an interrupted run (stopped mid-epoch) resumed in a new trainer ends with the **same generator weights (atol 1e-6)** as an uninterrupted run, with the adversarial loss active and across an epoch boundary |
+| Checkpoint mismatch | resuming with a different body label set raises `CheckpointMismatchError` |
+| **Overfit one batch** | CE 2.73 → 0.029 and pixel accuracy 3.6% → **100%** in 250 steps (small model, 64 px, 13 s on CPU) |
+| Notebook | all 19 code cells ran in dry-run mode |
+| Full test suite | 88 passed |
+
+### NOT verified yet
+
+* **No training on real data has run.** No real-data mIoU or class-fidelity numbers exist.
+* SCHP-Pascal body-map precompute on the Colab GPU (speed, total time).
+* Full-width model (67 M parameters at 128 px) on a T4: memory, speed, AMP behaviour.
+* Data-loader throughput on Colab's 2 CPU cores (each sample decodes three full-resolution PNGs).
