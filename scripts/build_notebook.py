@@ -155,7 +155,15 @@ if str(PROJECT_DIR) not in sys.path:
     sys.path.insert(0, str(PROJECT_DIR))
 if IN_COLAB:
     subprocess.run([sys.executable, "-m", "pip", "install", "-q", "-r", "requirements.txt"], check=True)
-print("project:", PROJECT_DIR)
+# If this runtime imported the project before (e.g. a re-used session), Python would keep using the OLD
+# modules even after `git pull`. Drop them so the next import loads the code that is now on disk.
+stale = [m for m in sys.modules if m == "src" or m.startswith("src.")]
+for m in stale:
+    del sys.modules[m]
+if stale:
+    print(f"reloaded project code ({len(stale)} previously imported modules discarded)")
+rev = subprocess.run(["git", "-C", str(PROJECT_DIR), "rev-parse", "--short", "HEAD"], capture_output=True, text=True)
+print("project:", PROJECT_DIR, "| commit:", rev.stdout.strip() or "unknown (not a git checkout)")
 """)
 code(r"""
 # Version / import verification
