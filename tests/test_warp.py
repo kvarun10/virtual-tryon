@@ -309,3 +309,47 @@ def test_set_rng_state_normalises_tensor_types():
     state["numpy"][1] = state["numpy"][1].clone()
     set_rng_state(state)
     assert torch.equal(torch.rand(3), first)
+
+
+def test_untrained_classes_never_predicted_and_not_in_miou(tmp_path):
+    """Regression (Colab run, 2026-10-20): stray 'hair'/'face' pixels added IoU-0 classes to mIoU
+    (0.68 over 7 trained classes was reported as 0.475 over 10)."""
+    t = WarpTrainer(cfg_for(tmp_path), verbose=False)
+    G = get_label_set("garment12")
+    untrained = set(G.indices(["hair", "face", "headwear", "accessory"]))
+    assert set(t.untrained_ids) == untrained and set(t.miou_exclude) == untrained | {0}
+    logits = torch.zeros(1, 12, 4, 4)
+    logits[:, G.index("hair")] = 10.0  # untrained class has the highest score everywhere
+    logits[:, G.index("top")] = 5.0
+    assert set(np.unique(t.to_labels(logits))) == {G.index("top")}
+    # metric: with the trained-only definition, an untrained class cannot enter the mean
+    from src.evaluation.metrics import ConfusionMatrix
+
+    cm = ConfusionMatrix(12, ignore_index=255)
+    gt = np.full((2, 4), G.index("top")); gt[1] = G.index("pants")
+    pred = gt.copy(); pred[0, 0] = G.index("hair")  # one stray pixel
+    cm.update(pred, gt)
+    old = cm.mean_iou(exclude=[0])
+    new = cm.mean_iou(exclude=t.miou_exclude)
+    assert old < new and new == pytest.approx((3 / 4 + 1.0) / 2)
+
+
+def test_evaluate_checkpoint_uses_whole_val_split(tmp_path):
+    WarpTrainer(cfg_for(tmp_path), verbose=False).fit(max_steps=2, resume=False)
+    t = WarpTrainer(cfg_for(tmp_path), verbose=False)
+    for which in ("last", "best"):
+        m = t.evaluate_checkpoint(which)
+        assert m["n_images"] == len(t.val_ds) and m["kind"] == f"eval_{which}" and m["step"] == 2
+    assert list(t.out_dir.glob("eval_last_step*.png"))
+    with pytest.raises(FileNotFoundError):
+        t.evaluate_checkpoint(str(tmp_path / "missing.pt"))
+
+
+def test_resume_resets_best_from_old_metric(tmp_path):
+    a = WarpTrainer(cfg_for(tmp_path), verbose=False)
+    a.fit(max_steps=1, resume=False)
+    st = torch.load(a.ckpt.last, weights_only=True)
+    st.pop("metric_version"); st["best"] = 0.99
+    torch.save(st, a.ckpt.last)
+    b = WarpTrainer(cfg_for(tmp_path), verbose=False)
+    assert b.resume() and b.best == -float("inf")

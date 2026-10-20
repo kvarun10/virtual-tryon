@@ -62,6 +62,9 @@ def class_area_agreement(input_cloth: np.ndarray, pred: np.ndarray, transfer_ids
     return float(np.minimum(a_in / a_in.sum(), a_pr / a_pr.sum()).sum())
 
 
+METRIC_VERSION = 2  # v2: mIoU over trained classes only; untrained classes masked out of predictions
+
+
 def _collate(batch):
     out = {k: torch.stack([b[k] for b in batch]) for k in ("cloth", "body", "target")}
     for k in ("mode", "src", "tgt"):
@@ -99,6 +102,11 @@ class WarpTrainer:
                           "garment_label_set": cfg.labels.garment_label_set,
                           "body_label_set": cfg.labels.body_label_set, "body_backend": cfg.segmentation.body_backend,
                           "transfer_classes": list(cfg.labels.transfer_classes)}
+        # Classes the warp is never trained on (IGNORE in every target): hair, face, headwear, accessory.
+        self.untrained_ids = list(self.train_ds.ignore_ids)
+        # mIoU = mean over the trained classes only (transfer classes + skin). Including untrained classes
+        # added spurious IoU-0 entries whenever a stray pixel was predicted as one of them (metric v1 bug).
+        self.miou_exclude = [0] + self.untrained_ids
         self.step = self.epoch = self.batch_in_epoch = 0
         self.best = -math.inf
         self.bad_evals = 0
@@ -109,7 +117,7 @@ class WarpTrainer:
         return {"gen": self.gen.state_dict(), "disc": self.disc.state_dict(), "opt_g": self.opt_g.state_dict(),
                 "opt_d": self.opt_d.state_dict(), "scaler": self.scaler.state_dict(), "step": self.step,
                 "epoch": self.epoch, "batch_in_epoch": self.batch_in_epoch, "best": self.best,
-                "bad_evals": self.bad_evals, "rng": rng_state(), "signature": self.signature,
+                "bad_evals": self.bad_evals, "rng": rng_state(), "signature": self.signature, "metric_version": METRIC_VERSION,
                 "config": json.loads(json.dumps(self.cfg.to_dict()))}
 
     def save(self, is_best: bool = False) -> None:
@@ -128,6 +136,9 @@ class WarpTrainer:
         self.scaler.load_state_dict(st["scaler"])
         self.step, self.epoch, self.batch_in_epoch = st["step"], st["epoch"], st["batch_in_epoch"]
         self.best, self.bad_evals = st["best"], st["bad_evals"]
+        if st.get("metric_version") != METRIC_VERSION:  # best score was measured with the old mIoU definition
+            self._print("checkpoint has a best-score from the old mIoU definition; resetting best/early-stop counters")
+            self.best, self.bad_evals = -math.inf, 0
         set_rng_state(st["rng"])
         self._print(f"resumed from step {self.step} (epoch {self.epoch}, batch {self.batch_in_epoch})")
         return True
@@ -248,36 +259,60 @@ class WarpTrainer:
         self.gen.train()
         return logits.float()
 
+    def to_labels(self, logits: torch.Tensor) -> np.ndarray:
+        """Argmax over trained classes only. Untrained classes (hair, face, headwear, accessory) never
+        receive a training signal, and at try-on time face/hair come from the target (paper Sec. 4.2)."""
+        logits = logits.clone()
+        logits[:, self.untrained_ids] = -torch.inf
+        return logits.argmax(1).cpu().numpy()
+
     @torch.no_grad()
-    def validate(self, max_batches: Optional[int] = None, save_grid: bool = True) -> Dict:
+    def validate(self, max_batches: Optional[int] = None, save_grid: bool = True, kind: str = "val") -> Dict:
+        """``max_batches``: None -> training.val_max_batches; 0 -> the whole validation split."""
         K = self.G_labels.num_classes
         cm = ConfusionMatrix(K, ignore_index=IGNORE)
         ces, first = [], None
         loader = DataLoader(self.val_ds, batch_size=self.t.batch_size, shuffle=False, num_workers=self.cfg.data.num_workers,
                             collate_fn=_collate)
-        limit = max_batches if max_batches is not None else self.t.val_max_batches
+        limit = self.t.val_max_batches if max_batches is None else (None if max_batches == 0 else max_batches)
+        n_images = 0
         for i, batch in enumerate(loader):
             if limit is not None and i >= limit:
                 break
             logits = self.predict(batch["cloth"], batch["body"])
             target = batch["target"].to(self.device)
             ces.append(float(segmentation_ce(logits, target)))
-            pred = logits.argmax(1).cpu().numpy()
+            pred = self.to_labels(logits)
             cm.update(pred, batch["target"].numpy())
+            n_images += pred.shape[0]
             if first is None:
                 first = (batch, pred)
-        summary = cm.summary(self.G_labels.names, exclude=[0])
+        summary = cm.summary(self.G_labels.names, exclude=self.miou_exclude)
         fidelity, area, swap_vis = self.swap_fidelity()
-        metrics = {"kind": "val", "step": self.step, "ce": float(np.mean(ces)), "pixel_accuracy": summary["pixel_accuracy"],
+        metrics = {"kind": kind, "step": self.step, "n_images": n_images, "metric_version": METRIC_VERSION,
+                   "ce": float(np.mean(ces)), "pixel_accuracy": summary["pixel_accuracy"],
                    "mean_iou": summary["mean_iou"], "per_class_iou": summary["per_class_iou"], "class_fidelity": fidelity,
                    "class_area_agreement": area}
         self.log.log(metrics)
-        self._print(f"[val] step {self.step}: ce {metrics['ce']:.4f} acc {metrics['pixel_accuracy']:.4f} "
+        self._print(f"[{kind}] step {self.step} ({n_images} images): ce {metrics['ce']:.4f} acc {metrics['pixel_accuracy']:.4f} "
                     f"mIoU {metrics['mean_iou']:.4f} | swap: class_fidelity {fidelity:.3f} area_agreement {area:.3f}")
-        per_class = {k: v for k, v in summary["per_class_iou"].items() if v is not None and k != "background"}
+        excluded = {self.G_labels.names[i] for i in self.miou_exclude}
+        per_class = {k: v for k, v in summary["per_class_iou"].items() if v is not None and k not in excluded}
         self._print("      per-class IoU: " + " ".join(f"{k} {v:.2f}" for k, v in per_class.items()))
         if save_grid and first is not None:
-            self.save_grid(first[0], first[1], swap_vis, self.out_dir / f"val_step{self.step:07d}.png")
+            self.save_grid(first[0], first[1], swap_vis, self.out_dir / f"{kind}_step{self.step:07d}.png")
+        return metrics
+
+    def evaluate_checkpoint(self, which: str = "last") -> Dict:
+        """Load generator weights from ``last`` / ``best`` / a path and score them on the WHOLE val split."""
+        path = {"last": self.ckpt.last, "best": self.ckpt.best}.get(which, Path(which))
+        st = self.ckpt.load(path, signature=self.signature, map_location="cpu")
+        if st is None:
+            raise FileNotFoundError(f"No checkpoint at {path}")
+        self.gen.load_state_dict(st["gen"])
+        self.step = st["step"]
+        metrics = self.validate(max_batches=0, kind=f"eval_{Path(path).stem}")
+        metrics["checkpoint"] = str(path)
         return metrics
 
     @torch.no_grad()
@@ -296,7 +331,7 @@ class WarpTrainer:
         vis = None
         loader = DataLoader(self.swap_ds, batch_size=self.t.batch_size, shuffle=False, collate_fn=_collate)
         for batch in loader:
-            pred = self.predict(batch["cloth"], batch["body"]).argmax(1).cpu().numpy()
+            pred = self.to_labels(self.predict(batch["cloth"], batch["body"]))
             present = batch["cloth"].flatten(2).amax(2).numpy() > 0  # [B, K] classes in the input
             for b in range(pred.shape[0]):
                 garment = np.isin(pred[b], transfer)
@@ -344,11 +379,18 @@ def main():
     ap.add_argument("--override", nargs="*", default=[])
     ap.add_argument("--max-steps", type=int, default=None)
     ap.add_argument("--no-resume", action="store_true")
+    ap.add_argument("--evaluate", nargs="+", default=None, metavar="CKPT",
+                    help="only evaluate checkpoints (last, best or a path) on the whole val split; no training")
     args = ap.parse_args()
     cfg = load_config(args.config, args.override)
     paths = ProjectPaths.from_config(cfg).ensure()
     save_config(cfg, paths.experiment_dir("outputs", cfg.experiment.name) / "config_warp.yaml")
     trainer = WarpTrainer(cfg)
+    if args.evaluate:
+        for which in args.evaluate:
+            m = trainer.evaluate_checkpoint(which)
+            print(json.dumps({k: m[k] for k in ("checkpoint", "step", "n_images", "mean_iou", "class_area_agreement")}, indent=1))
+        return
     print(json.dumps(trainer.fit(max_steps=args.max_steps, resume=not args.no_resume), indent=1))
 
 

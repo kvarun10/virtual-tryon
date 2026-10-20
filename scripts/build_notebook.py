@@ -57,6 +57,7 @@ DFMM_PARTS = "images_parsing"       # images + parsing + keypoints; "all" adds D
 PRECOMPUTE_BODY_MAPS = False        # once: SCHP-Pascal over all 12,701 annotated images (GPU), archived to Drive
 RUN_WARP_TRAINING = False           # start/resume warp training (Section 10)
 WARP_MAX_STEPS = 2000               # total optimiser steps; re-running resumes from the last checkpoint
+EVAL_WARP_CHECKPOINTS = []          # e.g. ["best", "last"]: score checkpoints on the WHOLE val split (no training)
 """)
 
 md(r"""
@@ -375,6 +376,7 @@ What to watch:
 * Validation `mIoU` (garment classes, background excluded) should rise.
 * Swap test (garment from one person, body from another): `class_area_agreement` should rise. It measures whether the predicted garment mix (e.g. top + skirt) matches the input; a skirt that turns into trousers scores low. `class_fidelity` is a lenient version of the same check.
 * Per-class IoU: rare classes (skirt, outer, dress) lag behind top/pants. Their trend matters more than the mean.
+* mIoU averages the 7 trained classes (skin, top, outer, dress, skirt, pants, footwear). Hair, face, headwear and accessories are never trained (face/hair come from the target person) and are excluded. Runs before 2026-10-21 used an older, buggy definition.
 """)
 code(r"""
 if RUN_WARP_TRAINING:
@@ -382,6 +384,16 @@ if RUN_WARP_TRAINING:
     print(result)
 else:
     print("Skipped (RUN_WARP_TRAINING=False).")
+""")
+code(r"""
+# Score saved checkpoints on all 1,271 validation images (mIoU over the 7 trained classes).
+# Use this to compare checkpoints; validation during training only uses the first val_max_batches batches.
+for which in EVAL_WARP_CHECKPOINTS:
+    m = trainer.evaluate_checkpoint(which)
+    print(f"{which:5s} step {m['step']}: mIoU {m['mean_iou']:.4f} | area agreement {m['class_area_agreement']:.3f} | "
+          f"acc {m['pixel_accuracy']:.4f} on {m['n_images']} images")
+if not EVAL_WARP_CHECKPOINTS:
+    print("Skipped (EVAL_WARP_CHECKPOINTS is empty).")
 """)
 code(r"""
 # Training curves and the latest validation grid (columns: input C_seg | B_seg | prediction | ground truth, grey = not supervised;
