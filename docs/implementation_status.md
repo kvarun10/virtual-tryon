@@ -88,3 +88,21 @@ reported, so parser accuracy on DFMM is still unmeasured.** Odd image sizes (165
 * SCHP-Pascal body-map precompute on the Colab GPU (speed, total time).
 * Full-width model (67 M parameters at 128 px) on a T4: memory, speed, AMP behaviour.
 * Data-loader throughput on Colab's 2 CPU cores (each sample decodes three full-resolution PNGs).
+
+### First real-data warp run (Colab T4, 2026-10-20, user-reported)
+
+| Item | Result |
+|---|---|
+| SCHP-Pascal body-map precompute | 12,701 maps in 31 min 28 s (6.83 img/s), archived to Drive |
+| Model | generator 66.6 M, discriminator 2.78 M params; peak 2.01 GB in the 8b overfit check (batch 2) |
+| Speed | 0.13–0.16 s/step at batch 8, 128 px, AMP; 1,270 steps/epoch (~3 min). Data loading is not a bottleneck |
+| Run | 500 steps, **CE only** (adversarial starts at step 500), pairing `mixed` |
+| Train CE | 2.52 → 0.245 |
+| Val (1,271 images, first 50 batches) | CE 0.244, pixel acc 0.945, **mIoU 0.426**, swap class_fidelity 0.912 |
+
+This is an early checkpoint, not a result. Qualitative swap-test findings: a top + **skirt** input
+became top + **trousers** on a target with separated legs (the silhouette shortcut predicted in
+`body_representation.md`), and an **outer** jacket became a **top**. Common classes (top, trousers,
+footwear, skin) are placed plausibly. `class_fidelity` scored the skirt case as correct because the
+input also contained a few trouser pixels, so the stricter `class_area_agreement` was added afterwards.
+Per-class IoU was recorded but not printed in this run.

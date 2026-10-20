@@ -373,7 +373,8 @@ To train longer, raise `WARP_MAX_STEPS` and re-run.
 What to watch:
 * `ce` should fall.
 * Validation `mIoU` (garment classes, background excluded) should rise.
-* `class_fidelity` (swap test: garment from one person, body from another) should stay high. If it drops, the network is copying the target's own clothing outline instead of the input garment.
+* Swap test (garment from one person, body from another): `class_area_agreement` should rise. It measures whether the predicted garment mix (e.g. top + skirt) matches the input; a skirt that turns into trousers scores low. `class_fidelity` is a lenient version of the same check.
+* Per-class IoU: rare classes (skirt, outer, dress) lag behind top/pants. Their trend matters more than the mean.
 """)
 code(r"""
 if RUN_WARP_TRAINING:
@@ -394,9 +395,15 @@ if tr:
     ax[0].plot([r["step"] for r in tr], [r["ce"] for r in tr]); ax[0].set_title("train CE"); ax[0].set_xlabel("step")
     if va:
         ax[1].plot([r["step"] for r in va], [r["mean_iou"] for r in va], marker="o", label="val mIoU")
-        ax[1].plot([r["step"] for r in va], [r["class_fidelity"] for r in va], marker="x", label="swap class fidelity")
+        ax[1].plot([r["step"] for r in va], [r["class_fidelity"] for r in va], marker="x", label="swap class fidelity (lenient)")
+        ax[1].plot([r["step"] for r in va], [r.get("class_area_agreement", float("nan")) for r in va], marker="s",
+                   label="swap area agreement (strict)")
         ax[1].legend(); ax[1].set_xlabel("step")
     plt.show()
+if va:
+    last = va[-1]
+    print(f"latest val (step {last['step']}): mIoU {last['mean_iou']:.3f}")
+    print("per-class IoU:", {k: round(v, 3) for k, v in last["per_class_iou"].items() if v is not None and k != "background"})
 grids = sorted(trainer.out_dir.glob("val_step*.png"))
 if grids:
     print(grids[-1].name); display(Image.open(grids[-1]))
