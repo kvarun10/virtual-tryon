@@ -280,3 +280,32 @@ def test_class_area_agreement_catches_skirt_to_pants():
     assert good == pytest.approx(1.0) and bad < 0.6  # lenient class_fidelity would score both 1.0
     assert class_area_agreement(cloth, np.zeros((20, 20), np.int64), transfer) == 0.0  # predicts nothing
     assert np.isnan(class_area_agreement(np.zeros_like(cloth), pred, transfer))  # no garment in input
+
+
+def test_resume_loads_checkpoint_on_cpu(tmp_path, monkeypatch):
+    """Regression (Colab T4, 2026-10-20): resume used map_location=cuda, which moved the saved RNG
+    state to the GPU; torch.set_rng_state then raised 'RNG state must be a torch.ByteTensor'."""
+    WarpTrainer(cfg_for(tmp_path), verbose=False).fit(max_steps=1, resume=False)
+    t = WarpTrainer(cfg_for(tmp_path), verbose=False)
+    seen = {}
+    orig = t.ckpt.load
+
+    def spy(path=None, signature=None, map_location="cpu"):
+        seen["map_location"] = map_location
+        return orig(path, signature, map_location)
+
+    monkeypatch.setattr(t.ckpt, "load", spy)
+    assert t.resume() and seen["map_location"] == "cpu"
+
+
+def test_set_rng_state_normalises_tensor_types():
+    from src.training.checkpointing import rng_state, set_rng_state
+
+    state = rng_state()
+    set_rng_state(state)
+    first = torch.rand(3)
+    # simulate a checkpoint whose tensors came back with another dtype/layout after map_location
+    state["torch"] = state["torch"].to(torch.int64)
+    state["numpy"][1] = state["numpy"][1].clone()
+    set_rng_state(state)
+    assert torch.equal(torch.rand(3), first)

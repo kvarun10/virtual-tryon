@@ -116,7 +116,9 @@ class WarpTrainer:
         self.ckpt.save(self.state(), self.step, is_best=is_best)
 
     def resume(self, path: Optional[Path] = None) -> bool:
-        st = self.ckpt.load(path, signature=self.signature, map_location=self.device)
+        # Load on CPU: load_state_dict copies weights to the model's device and Adam moves its own state.
+        # (Loading straight to CUDA also moved the RNG states, which torch only accepts as CPU byte tensors.)
+        st = self.ckpt.load(path, signature=self.signature, map_location="cpu")
         if st is None:
             return False
         self.gen.load_state_dict(st["gen"])

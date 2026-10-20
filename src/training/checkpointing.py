@@ -35,12 +35,19 @@ def rng_state() -> Dict:
     }
 
 
+def _byte_cpu(t: torch.Tensor) -> torch.Tensor:
+    """RNG setters require CPU uint8 tensors, whatever map_location the checkpoint was loaded with."""
+    return t.detach().to("cpu", torch.uint8)
+
+
 def set_rng_state(state: Dict) -> None:
-    torch.set_rng_state(state["torch"])
+    torch.set_rng_state(_byte_cpu(state["torch"]))
     if state.get("cuda") and torch.cuda.is_available():
-        torch.cuda.set_rng_state_all(state["cuda"])
+        cuda_states = [_byte_cpu(s) for s in state["cuda"]]
+        if len(cuda_states) == torch.cuda.device_count():
+            torch.cuda.set_rng_state_all(cuda_states)
     n = state["numpy"]
-    np.random.set_state((n[0], n[1].numpy().astype(np.uint32), n[2], n[3], n[4]))
+    np.random.set_state((n[0], n[1].detach().cpu().numpy().astype(np.uint32), n[2], n[3], n[4]))
     p = state["python"]
     random.setstate((p[-2], tuple(p[:-2]), p[-1]))
 
