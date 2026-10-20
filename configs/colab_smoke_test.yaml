@@ -27,3 +27,9 @@ training:
   batch_size: 2
   max_steps: 4
   amp: false
+
+model:               # tiny widths so the CPU dry run stays fast (the real configs use the paper's widths)
+  warp_base_channels: 16
+  warp_max_channels: 64
+  warp_res_blocks: 1
+  discriminator_base_channels: 16

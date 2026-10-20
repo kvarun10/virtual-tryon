@@ -110,6 +110,9 @@ class SegmentationConfig:
     device: str = "auto"
     cache_outputs: bool = True
     allow_weight_download: bool = False  # must be switched on explicitly
+    # Precomputed network body maps (Phase 4 training). Working copy on local disk, zip in Drive.
+    body_maps_local: str = "{cache_dir}/body_maps"
+    body_maps_archive: str = "{cache_dir}/body_maps_archives"
 
 
 @dataclass
@@ -133,7 +136,7 @@ class ReferenceConfig:
 
 
 @dataclass
-class TrainingConfig:  # reserved for Phases 4-5
+class TrainingConfig:  # warp fields used from Phase 4; texture fields reserved for Phase 5
     batch_size: int = 4
     epochs: int = 1
     max_steps: Optional[int] = None
@@ -145,6 +148,20 @@ class TrainingConfig:  # reserved for Phases 4-5
     warp_lr: float = 2e-4  # not given in the paper (engineering choice)
     warp_betas: List[float] = field(default_factory=lambda: [0.5, 0.999])
     lambda_adv_warp: float = 0.1  # not given in the paper
+    # --- warp stage (Phase 4); all engineering choices unless marked [P] ---
+    warp_pairing: str = "mixed"  # self (paper Sec. 5.1) | cross_view (same item, other photo) | mixed
+    warp_cross_view_prob: float = 0.5  # share of cross-view triplets when pairing=mixed
+    warp_cloth_affine: bool = True  # [P] random affine per garment class on the input C_seg
+    warp_affine_max_angle: float = 15.0
+    warp_affine_scale: List[float] = field(default_factory=lambda: [0.85, 1.15])
+    warp_affine_max_translate: float = 0.15
+    warp_body_aug: bool = True  # random per-part dilation/erosion of B_seg (silhouette shortcut, see docs)
+    warp_body_aug_max_px: int = 3  # at 128 px; scaled with image size
+    warp_gan_mode: str = "lsgan"  # lsgan | hinge | vanilla  (paper Eq. 3 form is ambiguous)
+    warp_adv_start_step: int = 500  # train with CE only before this step
+    warp_real_smoothing: float = 0.1  # label smoothing of real maps shown to D
+    warp_swap_samples: int = 64  # swap-diagnostic pairs evaluated at each validation
+    val_max_batches: Optional[int] = 50
     checkpoint_every: int = 500
     log_every: int = 50
     val_every: int = 1000
@@ -152,11 +169,15 @@ class TrainingConfig:  # reserved for Phases 4-5
 
 
 @dataclass
-class ModelConfig:  # reserved for Phases 4-5
+class ModelConfig:  # warp fields used from Phase 4; texture fields reserved for Phase 5
     warp_base_channels: int = 64
     warp_cloth_bottleneck: int = 2  # paper: 2 x 2 x 1024 at 256 px
     warp_res_blocks: int = 4  # paper Fig. 8
     warp_skip: str = "body"  # body | dual | none
+    warp_max_channels: int = 1024  # [P] 2 x 2 x 1024 bottleneck
+    warp_norm: str = "instance"  # instance | batch | none
+    warp_dropout: float = 0.0
+    disc_layers: int = 3  # PatchGAN depth
     texture_corr_size: int = 64  # CoCosNet: 64 x 64 correspondence
     texture_alpha: float = 100.0  # CoCosNet default softmax sharpness
     texture_feat_channels: int = 256
@@ -290,6 +311,8 @@ def _resolve_placeholders(cfg: ProjectConfig) -> None:
     refresh_names()
     for attr in ("root", "archive_dir", "split_file", "index_file"):
         setattr(cfg.data, attr, fmt(getattr(cfg.data, attr)))
+    for attr in ("body_maps_local", "body_maps_archive"):
+        setattr(cfg.segmentation, attr, fmt(getattr(cfg.segmentation, attr)))
 
 
 def validate_config(cfg: ProjectConfig) -> None:
@@ -326,6 +349,15 @@ def validate_config(cfg: ProjectConfig) -> None:
     overlap = set(cfg.labels.transfer_classes) & set(cfg.labels.preserve_classes)
     if overlap:
         raise ConfigError(f"labels.transfer_classes and preserve_classes overlap: {sorted(overlap)}")
+    t, m = cfg.training, cfg.model
+    if t.warp_pairing not in {"self", "cross_view", "mixed"}:
+        raise ConfigError("training.warp_pairing must be self|cross_view|mixed")
+    if t.warp_gan_mode not in {"lsgan", "hinge", "vanilla"}:
+        raise ConfigError("training.warp_gan_mode must be lsgan|hinge|vanilla")
+    if m.warp_skip not in {"body", "dual", "none"} or m.warp_norm not in {"instance", "batch", "none"}:
+        raise ConfigError("model.warp_skip must be body|dual|none and model.warp_norm instance|batch|none")
+    if not 0.0 <= t.warp_cross_view_prob <= 1.0:
+        raise ConfigError("training.warp_cross_view_prob must be in [0, 1]")
     if cfg.training.grad_accum_steps < 1 or cfg.training.batch_size < 1:
         raise ConfigError("training.batch_size and grad_accum_steps must be >= 1")
 
