@@ -46,6 +46,22 @@ from src.utils.paths import ProjectPaths
 from src.utils.reproducibility import seed_everything
 
 
+def class_area_agreement(input_cloth: np.ndarray, pred: np.ndarray, transfer_ids) -> float:
+    """Histogram intersection of garment-class *areas*: input C_seg vs prediction (one swap pair).
+
+    ``input_cloth`` [K, H, W] one-hot-like, ``pred`` [H, W] class ids. Each side is reduced to the
+    share of garment pixels per transfer class; the score is sum(min(p_in, p_pred)) in [0, 1].
+    1 = the prediction contains the same garment mix as the input; a skirt turned into trousers
+    scores low even if a few trouser pixels were in the input (which ``class_fidelity`` would accept).
+    Areas differ legitimately between bodies, so this is a proxy, not an accuracy.
+    """
+    a_in = np.array([input_cloth[k].sum() for k in transfer_ids], dtype=np.float64)
+    a_pr = np.array([(pred == k).sum() for k in transfer_ids], dtype=np.float64)
+    if a_in.sum() == 0 or a_pr.sum() == 0:
+        return float("nan") if a_in.sum() == 0 else 0.0
+    return float(np.minimum(a_in / a_in.sum(), a_pr / a_pr.sum()).sum())
+
+
 def _collate(batch):
     out = {k: torch.stack([b[k] for b in batch]) for k in ("cloth", "body", "target")}
     for k in ("mode", "src", "tgt"):
@@ -145,7 +161,7 @@ class WarpTrainer:
                 d_loss = self.gan.d_loss(self.disc(torch.cat([real, body.to(real.dtype)], 1)),
                                          self.disc(torch.cat([fake.detach(), body.to(fake.dtype)], 1)))
             self.scaler.scale(d_loss / accum).backward()
-        return {"ce": float(ce), "g_adv": float(g_adv), "d": float(d_loss)}
+        return {"ce": ce.item(), "g_adv": g_adv.item(), "d": d_loss.item()}
 
     def _optimizer_step(self, adv: bool) -> None:
         self.scaler.unscale_(self.opt_g)
@@ -249,23 +265,32 @@ class WarpTrainer:
             if first is None:
                 first = (batch, pred)
         summary = cm.summary(self.G_labels.names, exclude=[0])
-        fidelity, swap_vis = self.swap_fidelity()
+        fidelity, area, swap_vis = self.swap_fidelity()
         metrics = {"kind": "val", "step": self.step, "ce": float(np.mean(ces)), "pixel_accuracy": summary["pixel_accuracy"],
-                   "mean_iou": summary["mean_iou"], "per_class_iou": summary["per_class_iou"], "class_fidelity": fidelity}
+                   "mean_iou": summary["mean_iou"], "per_class_iou": summary["per_class_iou"], "class_fidelity": fidelity,
+                   "class_area_agreement": area}
         self.log.log(metrics)
         self._print(f"[val] step {self.step}: ce {metrics['ce']:.4f} acc {metrics['pixel_accuracy']:.4f} "
-                    f"mIoU {metrics['mean_iou']:.4f} swap class_fidelity {fidelity:.3f}")
+                    f"mIoU {metrics['mean_iou']:.4f} | swap: class_fidelity {fidelity:.3f} area_agreement {area:.3f}")
+        per_class = {k: v for k, v in summary["per_class_iou"].items() if v is not None and k != "background"}
+        self._print("      per-class IoU: " + " ".join(f"{k} {v:.2f}" for k, v in per_class.items()))
         if save_grid and first is not None:
             self.save_grid(first[0], first[1], swap_vis, self.out_dir / f"val_step{self.step:07d}.png")
         return metrics
 
     @torch.no_grad()
     def swap_fidelity(self):
-        """Share of predicted transfer-class pixels whose class occurs in the *input* C_seg (swap pairs)."""
+        """Swap pairs (garment from one person, body from another; no ground truth).
+
+        Returns (class_fidelity, class_area_agreement, visualisation batch):
+        * class_fidelity: share of predicted garment pixels whose class occurs anywhere in the input (lenient)
+        * class_area_agreement: mean histogram intersection of garment-class areas (stricter, see function)
+        """
         if len(self.swap_ds) == 0:
-            return float("nan"), None
+            return float("nan"), float("nan"), None
         transfer = self.G_labels.indices(self.cfg.labels.transfer_classes)
         hits = total = 0
+        areas = []
         vis = None
         loader = DataLoader(self.swap_ds, batch_size=self.t.batch_size, shuffle=False, collate_fn=_collate)
         for batch in loader:
@@ -275,9 +300,11 @@ class WarpTrainer:
                 garment = np.isin(pred[b], transfer)
                 total += int(garment.sum())
                 hits += int((garment & present[b][pred[b]]).sum())
+                areas.append(class_area_agreement(batch["cloth"][b].numpy(), pred[b], transfer))
             if vis is None:
                 vis = (batch, pred)
-        return (hits / total if total else float("nan")), vis
+        areas = [a for a in areas if not np.isnan(a)]
+        return (hits / total if total else float("nan")), (float(np.mean(areas)) if areas else float("nan")), vis
 
     def save_grid(self, batch, pred, swap_vis, path: Path, n: int = 4) -> Path:
         G = self.G_labels

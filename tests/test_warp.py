@@ -20,7 +20,7 @@ from src.models.segmentation import SegmentationBackend, SegmentationResult
 from src.models.warp_network import DualPathUNet
 from src.training.checkpointing import CheckpointMismatchError
 from src.training.losses import GANLoss, masked_probs, real_maps, segmentation_ce
-from src.training.train_warp import WarpTrainer
+from src.training.train_warp import WarpTrainer, class_area_agreement
 
 SMALL = ["data.image_size=[64,64]", "model.warp_base_channels=8", "model.warp_max_channels=32",
          "model.warp_res_blocks=1", "model.discriminator_base_channels=8", "training.batch_size=2",
@@ -233,6 +233,7 @@ def test_validation_outputs(tmp_path):
     m = t.validate()
     assert 0 <= m["pixel_accuracy"] <= 1 and np.isfinite(m["ce"])
     assert np.isnan(m["class_fidelity"]) or 0 <= m["class_fidelity"] <= 1
+    assert "class_area_agreement" in m
     assert list(t.out_dir.glob("val_step*.png"))
     assert t.use_amp is False  # CPU
 
@@ -259,3 +260,23 @@ def test_overfit_one_batch(tmp_path):
     acc = (pred[valid] == target[valid]).float().mean().item()
     assert loss.item() < 0.1 * first, f"loss {first:.3f} -> {loss.item():.3f}"
     assert acc > 0.97, f"pixel accuracy after overfitting only {acc:.3f}"
+
+
+def test_class_area_agreement_catches_skirt_to_pants():
+    """Real failure seen at step 500: input = top + skirt (+ a few trouser pixels), prediction = top + trousers."""
+    G = get_label_set("garment12")
+    top, skirt, pants = G.index("top"), G.index("skirt"), G.index("pants")
+    transfer = G.indices(["top", "outer", "dress", "skirt", "pants", "footwear"])
+    cloth = np.zeros((12, 20, 20), np.float32)
+    cloth[top, :8] = 1
+    cloth[skirt, 8:18] = 1
+    cloth[pants, 18:] = 1  # a few trouser pixels in the input
+    pred = np.zeros((20, 20), np.int64)
+    pred[:8] = top
+    pred[8:] = pants  # skirt turned into trousers
+    bad = class_area_agreement(cloth, pred, transfer)
+    good_pred = pred.copy(); good_pred[8:18] = skirt
+    good = class_area_agreement(cloth, good_pred, transfer)
+    assert good == pytest.approx(1.0) and bad < 0.6  # lenient class_fidelity would score both 1.0
+    assert class_area_agreement(cloth, np.zeros((20, 20), np.int64), transfer) == 0.0  # predicts nothing
+    assert np.isnan(class_area_agreement(np.zeros_like(cloth), pred, transfer))  # no garment in input
