@@ -1,0 +1,6 @@
+photo,description,iou_ppp_person_vs_lip_person,share_upper_garment_px_labelled_torso_or_arms_by_ppp,share_ppp_torso_arms_px_that_are_upper_garment
+1,T-shirt + jeans frontal,0.963,0.962,0.667
+2,T-shirt + jeans side pose,0.944,0.950,0.734
+3,patterned long-sleeve shirt,0.969,0.942,0.951
+4,long maxi dress,0.393,0.339,0.852
+5,jacket over shirt + jeans,0.961,0.964,0.952

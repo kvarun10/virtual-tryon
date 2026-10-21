@@ -62,3 +62,42 @@ class ConfusionMatrix:
             "gt_pixels": {n: int(c) for n, c in zip(class_names, self.matrix.sum(1))},
             "excluded_from_mean": [class_names[i] for i in exclude],
         }
+
+
+# ======================================================================================
+# Image metrics (RGB) - valid only when a paired ground-truth image exists
+# ======================================================================================
+
+def _gaussian_window(size: int = 11, sigma: float = 1.5):
+    import torch
+
+    x = torch.arange(size, dtype=torch.float32) - size // 2
+    g = torch.exp(-(x ** 2) / (2 * sigma ** 2))
+    g = g / g.sum()
+    return (g[:, None] * g[None, :])[None, None]
+
+
+def ssim(img1, img2, data_range: float = 1.0, window: int = 11, sigma: float = 1.5):
+    """Mean SSIM per image (Wang et al. 2004): Gaussian 11x11 window, sigma 1.5, K1 = 0.01, K2 = 0.03.
+
+    ``img1``, ``img2``: torch tensors [B, 3, H, W] in [0, data_range]. Channels are averaged.
+    Returns a tensor [B]. Use only with a real paired reference image (e.g. cross-view validation pairs).
+    """
+    import torch
+    import torch.nn.functional as F
+
+    if img1.shape != img2.shape or img1.ndim != 4:
+        raise ValueError(f"ssim needs equal [B,C,H,W] tensors, got {tuple(img1.shape)} / {tuple(img2.shape)}")
+    c = img1.shape[1]
+    w = _gaussian_window(window, sigma).to(img1.device).expand(c, 1, window, window)
+    x, y = img1.float(), img2.float()
+    pad = window // 2
+    mu_x = F.conv2d(x, w, padding=pad, groups=c)
+    mu_y = F.conv2d(y, w, padding=pad, groups=c)
+    sxx = F.conv2d(x * x, w, padding=pad, groups=c) - mu_x ** 2
+    syy = F.conv2d(y * y, w, padding=pad, groups=c) - mu_y ** 2
+    sxy = F.conv2d(x * y, w, padding=pad, groups=c) - mu_x * mu_y
+    c1, c2 = (0.01 * data_range) ** 2, (0.03 * data_range) ** 2
+    m = ((2 * mu_x * mu_y + c1) * (2 * sxy + c2)) / ((mu_x ** 2 + mu_y ** 2 + c1) * (sxx + syy + c2))
+    m = m[..., pad:-pad, pad:-pad]  # drop borders affected by zero padding
+    return m.flatten(1).mean(1)

@@ -72,3 +72,96 @@ class GANLoss:
         if self.mode == "hinge":
             return -f.mean()
         return F.binary_cross_entropy_with_logits(f, torch.ones_like(f))
+
+
+# ======================================================================================
+# Texture stage (Stage C)
+# ======================================================================================
+
+from pathlib import Path  # noqa: E402
+
+import torch.nn as nn  # noqa: E402
+
+
+class VGGWeightsUnavailableError(FileNotFoundError):
+    pass
+
+
+class VGGPerceptualLoss(nn.Module):
+    """L1 between VGG-19 features of generated and real images (pix2pixHD / SPADE weighting).
+
+    Layers relu1_1, relu2_1, relu3_1, relu4_1, relu5_1 with weights 1/32, 1/16, 1/8, 1/4, 1. Inputs are
+    RGB in [-1, 1] and are converted to ImageNet normalisation. Weights: torchvision VGG19_Weights.IMAGENET1K_V1
+    (download.pytorch.org, ~548 MB). They are cached under ``cache_dir`` and downloaded only with ``allow_download``.
+    ``init='random'`` uses an untrained VGG; this exists only for offline tests and gives meaningless perceptual values.
+    """
+
+    LAYER_ENDS = (2, 7, 12, 21, 30)  # indices in vgg19.features after relu1_1 ... relu5_1
+    WEIGHTS = (1 / 32, 1 / 16, 1 / 8, 1 / 4, 1.0)
+
+    def __init__(self, init: str = "imagenet", cache_dir=None, allow_download: bool = False):
+        super().__init__()
+        from torchvision.models import VGG19_Weights, vgg19
+
+        if init == "random":
+            features = vgg19(weights=None).features
+        else:
+            url = VGG19_Weights.IMAGENET1K_V1.url
+            cache = Path(cache_dir) if cache_dir else Path(torch.hub.get_dir()) / "checkpoints"
+            file = cache / url.rsplit("/", 1)[-1]
+            if not file.is_file():
+                if not allow_download:
+                    raise VGGWeightsUnavailableError(
+                        f"VGG-19 ImageNet weights not found at {file} (~548 MB, BSD licence, {url}). Set "
+                        "training.allow_vgg_download=true to download them once, or copy the file there."
+                    )
+                cache.mkdir(parents=True, exist_ok=True)
+                torch.hub.download_url_to_file(url, str(file), progress=True)
+            model = vgg19(weights=None)
+            model.load_state_dict(torch.load(file, map_location="cpu", weights_only=True))
+            features = model.features
+        self.slices = nn.ModuleList()
+        start = 0
+        for end in self.LAYER_ENDS:
+            self.slices.append(nn.Sequential(*[features[i] for i in range(start, end)]))
+            start = end
+        for p in self.parameters():
+            p.requires_grad_(False)
+        self.eval()
+        self.register_buffer("mean", torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1))
+        self.register_buffer("std", torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1))
+        self.init = init
+
+    def train(self, mode: bool = True):  # always frozen / eval
+        return super().train(False)
+
+    def forward(self, fake: torch.Tensor, real: torch.Tensor) -> torch.Tensor:
+        x = ((fake.float() + 1) / 2 - self.mean) / self.std
+        y = ((real.float() + 1) / 2 - self.mean) / self.std
+        loss = fake.new_zeros((), dtype=torch.float32)
+        for w, block in zip(self.WEIGHTS, self.slices):
+            x, y = block(x), block(y)
+            loss = loss + w * F.l1_loss(x, y.detach())
+        return loss
+
+
+def multiscale_hinge_d(real_outs, fake_outs) -> torch.Tensor:
+    """Paper Eq. 8 summed over discriminator scales; ``*_outs`` = [(logits, features), ...]."""
+    gan = GANLoss("hinge")
+    return sum(gan.d_loss(r[0], f[0]) for r, f in zip(real_outs, fake_outs)) / len(real_outs)
+
+
+def multiscale_hinge_g(fake_outs) -> torch.Tensor:
+    """Paper Eq. 9 summed over scales."""
+    gan = GANLoss("hinge")
+    return sum(gan.g_loss(f[0]) for f in fake_outs) / len(fake_outs)
+
+
+def feature_matching(real_outs, fake_outs) -> torch.Tensor:
+    """L1 between D's intermediate features for real and generated images (real side detached)."""
+    loss, n = 0.0, 0
+    for (_, rf), (_, ff) in zip(real_outs, fake_outs):
+        for r, f in zip(rf, ff):
+            loss = loss + F.l1_loss(f.float(), r.detach().float())
+            n += 1
+    return loss / max(n, 1)

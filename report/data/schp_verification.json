@@ -1,0 +1,11 @@
+{
+  "architecture_check": {"method": "original AugmentCE2P built with a stub ABN vs our SCHPNet",
+                         "tensor_names_and_shapes": "603 identical (20, 18 and 7 classes)",
+                         "max_relative_output_difference": 2.1e-05},
+  "preprocessing_affine_check": {"cases": "5 image sizes x 2 input sizes x forward/inverse", "max_abs_difference": 0.0},
+  "inplace_abn_rule": "gamma_effective = abs(weight) + eps (read from modules/src/inplace_abn_cpu.cpp and _cuda.cu)",
+  "real_checkpoints": {"schp_lip": {"MiB": 255.1, "sha256_prefix": "24fa3254ceeb74c8", "strict_load": "603/603"},
+                       "schp_pascal": {"MiB": 255.0, "sha256_prefix": "3b03d343c39fb069", "strict_load": "603/603"}},
+  "negative_gammas_in_lip_checkpoint": {"negative": 3360, "total": 57264, "share": 0.0587,
+                                        "meaning": "plain BatchNorm would silently give wrong outputs in these channels"}
+}

@@ -54,3 +54,9 @@ Thumbs.db
 
 # --- Copyrighted paper (Springer exclusive licence): keep locally, do not publish ---
 researchpaper.pdf
+
+# --- Report material containing real photos (dataset licence / personal photos): local only ---
+/report/private/
+
+# --- Office lock files ---
+~$*

@@ -135,3 +135,42 @@ Qualitative (validation grid, step 10,000): common outfits closely match the gro
 test the jacket now stays a jacket and the dress stays a dress on a trousers-wearing target. The skirt
 is now kept, but is drawn split along the target's legs, and long garments are clipped short:
 a remaining partial silhouette leak from SCHP-Pascal body maps.
+
+### Official warp baseline (full validation split, metric v2, 2026-10-21)
+
+Run in Colab at commit `2c60c63` with `evaluate_checkpoint`, on all 1,271 validation images (item-disjoint split, seed 0).
+128 px, SCHP-Pascal body maps, mixed pairing, LSGAN λ=0.1.
+
+| Checkpoint | mIoU (7 trained classes) | skin | top | outer | dress | skirt | pants | footwear | swap area agreement | swap class fidelity | val CE | pixel acc |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| step 3,000 (`best.pt`, chosen by the v1 metric) | 0.640 | 0.61 | 0.72 | 0.53 | 0.75 | 0.55 | 0.75 | 0.57 | 0.821 | 0.968 | 0.190 | 0.967 |
+| **step 10,000 (`last.pt`) - baseline** | **0.689** | 0.67 | 0.76 | 0.56 | 0.78 | 0.63 | 0.79 | 0.63 | **0.842** | 0.958 | **0.174** | 0.972 |
+
+These are our own measurements with our own protocol. They are **not comparable** with the paper's Table 2
+(label-to-image mIoU), which measures something else. The test split has not been used.
+Known weaknesses: outer and skirt (rare classes, different shape from the target's own clothing);
+long garments are drawn too short or split along the legs on targets with visible legs (silhouette leak).
+
+## Phase 5: texture stage (2026-10-21)
+
+### Verified locally (CPU, synthetic fixture, untrained VGG)
+
+| Check | Result |
+|---|---|
+| Correspondence maths (Eqs. 5–6) | with position-identifying features, I_S equals the permuted exemplar; attention rows sum to 1; a perfect bijection gives a perfect cycle |
+| α behaviour | α = 0.001 → uniform average (blur); α = 1000 → exact self-match |
+| FP32 correlation | attention and I_S stay float32 under bfloat16 autocast |
+| Shapes | 64/128 px, exemplar parsing on/off; 128 px: G 27.4 M (nf 32), 256 px: G 97.2 M (nf 64); D 5.6 M (2 scales) |
+| Correlation memory | 32×32: 4 MiB per sample for M (FP32); 64×64: 64 MiB |
+| Losses | hinge (multi-scale), feature matching, VGG, warp L1, cycle, domain all finite; **every generator parameter receives a finite gradient** |
+| VGG weights | download gated (`training.allow_vgg_download`), cached in `pretrained/torch` |
+| SSIM | identical images = 1, symmetric, noise < 0.2 |
+| Exact resume | interrupted + resumed texture run matches the uninterrupted run (atol 1e-5) across an epoch boundary |
+| Overfit one batch | L1 0.95 → 0.008, SSIM 0.62 → **0.994** in 300 steps (64 px, CPU, 125 s) |
+| Notebook | all 24 code cells run in dry-run mode (offline: untrained VGG) |
+
+### NOT verified yet
+
+* No texture training on real data; no real SSIM numbers; T4 speed and memory unknown for the 27 M generator.
+* VGG-19 ImageNet weights not downloaded yet (needs `ALLOW_VGG_DOWNLOAD=True` once, ~548 MB).
+* End-to-end try-on (warp output → texture) is Phase 6.

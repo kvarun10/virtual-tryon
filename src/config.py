@@ -162,6 +162,18 @@ class TrainingConfig:  # warp fields used from Phase 4; texture fields reserved 
     warp_real_smoothing: float = 0.1  # label smoothing of real maps shown to D
     warp_swap_samples: int = 64  # swap-diagnostic pairs evaluated at each validation
     val_max_batches: Optional[int] = 50
+    # --- texture stage (Phase 5); lr_generator / lr_discriminator / betas above are the paper's ---
+    texture_cross_view_prob: float = 0.8  # else pseudo pair (exemplar = distorted target photo, CoCosNet)
+    texture_adv_start_step: int = 0
+    lambda_tex_adv: float = 1.0  # [P] hinge adversarial (Eqs. 8-9)
+    lambda_tex_fm: float = 10.0  # D feature matching (SPADE/pix2pixHD) [E]
+    lambda_tex_vgg: float = 10.0  # VGG-19 perceptual vs ground truth [R:CoCosNet]
+    lambda_tex_warp: float = 1.0  # L1(warped exemplar, downsampled ground truth) [E, CoCosNet warp_self]
+    lambda_tex_cycle: float = 1.0  # correspondence cycle regularisation [R:CoCosNet L_reg]
+    lambda_tex_domain: float = 5.0  # domain alignment F_x(layout) ~ F_y(image) [R:CoCosNet]
+    lambda_tex_l1: float = 0.0  # plain pixel L1 to ground truth (off by default)
+    texture_vgg_init: str = "imagenet"  # imagenet | random (random only for offline tests)
+    allow_vgg_download: bool = False  # torchvision VGG-19 ImageNet weights (~548 MB), cached in pretrained/torch
     checkpoint_every: int = 500
     log_every: int = 50
     val_every: int = 1000
@@ -181,6 +193,9 @@ class ModelConfig:  # warp fields used from Phase 4; texture fields reserved for
     texture_corr_size: int = 64  # CoCosNet: 64 x 64 correspondence
     texture_alpha: float = 100.0  # CoCosNet default softmax sharpness
     texture_feat_channels: int = 256
+    texture_exemplar_parsing: bool = True  # feed the exemplar's garment parsing to F_y [E], see docs/texture_stage.md
+    texture_norm: str = "positional"  # positional (CoCosNet) | instance
+    disc_scales: int = 2  # multi-scale PatchGAN for the texture stage
     generator_base_channels: int = 64
     discriminator_base_channels: int = 64
     spectral_norm: bool = True
@@ -356,6 +371,10 @@ def validate_config(cfg: ProjectConfig) -> None:
         raise ConfigError("training.warp_gan_mode must be lsgan|hinge|vanilla")
     if m.warp_skip not in {"body", "dual", "none"} or m.warp_norm not in {"instance", "batch", "none"}:
         raise ConfigError("model.warp_skip must be body|dual|none and model.warp_norm instance|batch|none")
+    if t.texture_vgg_init not in {"imagenet", "random"} or m.texture_norm not in {"positional", "instance"}:
+        raise ConfigError("training.texture_vgg_init must be imagenet|random; model.texture_norm positional|instance")
+    if not 0.0 <= t.texture_cross_view_prob <= 1.0:
+        raise ConfigError("training.texture_cross_view_prob must be in [0, 1]")
     if not 0.0 <= t.warp_cross_view_prob <= 1.0:
         raise ConfigError("training.warp_cross_view_prob must be in [0, 1]")
     if cfg.training.grad_accum_steps < 1 or cfg.training.batch_size < 1:

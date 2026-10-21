@@ -21,7 +21,12 @@ Sources: [P] = paper, [R:x] = reference x, [E] = our engineering decision.
 | D13 | Self-supervised triplets with random affine (Sec. 5.1) | per-class affine (SwapNet-style) **plus** cross-view triplets from same-item photos (`warp_pairing: mixed`) | faithful + addition | DFMM item IDs make real pose-change supervision possible |
 | D14 | Body segmentation with NBF (12 parts, body under clothing) | SCHP-Pascal (7 parts) traces the **clothed** silhouette; per-part dilation/erosion augmentation and a swap-test `class_fidelity` metric counter the silhouette shortcut | simplified substitute | see `body_representation.md` |
 | D15 | Warp optimiser not given | Adam lr 2e-4, betas (0.5, 0.999), grad-norm clip 10 | engineering | pix2pix convention |
-| D16 | Texture stage | — | not implemented (Phase 5) | — |
+| D16 | Alignment network (Eqs. 5–6): feature pyramids F_x, F_y; correlation; softmax(α M) | domain adaptors to 32×32 (64×64 at 256 px) + shared block; cosine of channel-centred features and softmax computed in **FP32**; α = 100 | faithful (CoCosNet details) | Dress-up gives no adaptor details |
+| D17 | Eq. 6 warps T_C (features) | warps the exemplar **RGB** downsampled to the correspondence size | adapted | follows CoCosNet; Dress-up calls the result an image (I_S) |
+| D18 | F_y input = exemplar image | exemplar image **+ its garment12 parsing** (switchable) | adapted | semantic labels make the correspondence learnable on a small budget; ablation planned |
+| D19 | SPADE translation (Eq. 7) conditioned on I_S, constant code z | learned constant input; SPADE γ/β from I_S **+ layout**; positional normalisation; spectral norm | adapted | layout gives sharp garment boundaries the 32×32 I_S cannot |
+| D20 | Texture losses: hinge GAN only (Eqs. 8–9) | hinge GAN (2-scale PatchGAN) + D feature matching + VGG-19 perceptual + warp L1 + cycle regularisation + domain alignment; **no contextual loss** | adapted | adversarial-only does not train at this scale; paired ground truth makes the contextual loss less necessary |
+| D21 | Texture optimiser: Adam (0, 0.999), lr_G 1e-4, "imbalanced" lr_D | same, lr_D = 4e-4 | faithful + CoCosNet TTUR | |
+| D22 | Texture training data (not described) | ground-truth layouts; exemplar = another photo of the same item (80%) or a distorted copy of the target (20%, CoCosNet pseudo pairs) | adapted | warp outputs are only used at try-on time (Phase 6) |
 
-Planned deviations for Phase 5 (already documented in `paper_analysis.md` §2): warping the RGB exemplar as in
-CoCosNet; the CoCosNet loss set in addition to the hinge GAN; D lr 4e-4; no SyncBN.
+No SyncBN anywhere (single GPU). Full texture-stage design: `texture_stage.md`.

@@ -1,0 +1,136 @@
+experiment:
+  name: baseline_128
+  seed: 42
+  run_mode: baseline
+  device: cuda
+  deterministic: false
+  dry_run: false
+paths:
+  drive_root: /content/drive/MyDrive/VirtualTryOn
+  datasets_dir: /content/drive/MyDrive/VirtualTryOn/datasets
+  pretrained_dir: /content/drive/MyDrive/VirtualTryOn/pretrained
+  checkpoints_dir: /content/drive/MyDrive/VirtualTryOn/checkpoints
+  cache_dir: /content/drive/MyDrive/VirtualTryOn/cache
+  outputs_dir: /content/drive/MyDrive/VirtualTryOn/outputs
+  logs_dir: /content/drive/MyDrive/VirtualTryOn/logs
+data:
+  dataset: deepfashion_multimodal
+  root: /content/data/DeepFashion-MultiModal
+  archive_dir: /content/drive/MyDrive/VirtualTryOn/datasets/DeepFashion-MultiModal/archives
+  layout:
+    images_dir: images
+    parsing_dir: segm
+    densepose_dir: densepose
+    keypoints_loc: keypoints/keypoints_loc.txt
+    keypoints_vis: keypoints/keypoints_vis.txt
+    image_ext: .jpg
+    parsing_suffix: _segm.png
+    densepose_suffix: _densepose.png
+    densepose_part_channel: 2
+  image_size:
+  - 128
+  - 128
+  resize_mode: letterbox
+  pad_value_image: 255
+  require_parsing: true
+  require_densepose: false
+  split_ratios:
+    train: 0.8
+    val: 0.1
+    test: 0.1
+  split_seed: 0
+  split_file: /content/drive/MyDrive/VirtualTryOn/cache/splits/deepfashion_multimodal_seed0.json
+  index_file: /content/drive/MyDrive/VirtualTryOn/cache/index/deepfashion_multimodal_index.json
+  max_samples: null
+  image_check: header
+  num_workers: 2
+segmentation:
+  clothing_backend: schp_lip
+  body_backend: schp_pascal
+  device: auto
+  cache_outputs: true
+  allow_weight_download: false
+  body_maps_local: /content/cache/body_maps
+  body_maps_archive: /content/drive/MyDrive/VirtualTryOn/cache/body_maps_archives
+labels:
+  garment_label_set: garment12
+  body_label_set: pascal_person_part
+  transfer_classes:
+  - top
+  - outer
+  - dress
+  - skirt
+  - pants
+  - footwear
+  preserve_classes:
+  - hair
+  - face
+reference:
+  mode: person_worn
+  garment_category: null
+  background_tolerance: 30.0
+  min_garment_fraction: 0.02
+training:
+  batch_size: 8
+  epochs: 1
+  max_steps: null
+  grad_accum_steps: 1
+  amp: true
+  lr_generator: 0.0001
+  lr_discriminator: 0.0004
+  betas:
+  - 0.0
+  - 0.999
+  warp_lr: 0.0002
+  warp_betas:
+  - 0.5
+  - 0.999
+  lambda_adv_warp: 0.1
+  warp_pairing: mixed
+  warp_cross_view_prob: 0.5
+  warp_cloth_affine: true
+  warp_affine_max_angle: 15.0
+  warp_affine_scale:
+  - 0.85
+  - 1.15
+  warp_affine_max_translate: 0.15
+  warp_body_aug: true
+  warp_body_aug_max_px: 3
+  warp_gan_mode: lsgan
+  warp_adv_start_step: 500
+  warp_real_smoothing: 0.1
+  warp_swap_samples: 64
+  val_max_batches: 50
+  texture_cross_view_prob: 0.8
+  texture_adv_start_step: 0
+  lambda_tex_adv: 1.0
+  lambda_tex_fm: 10.0
+  lambda_tex_vgg: 10.0
+  lambda_tex_warp: 1.0
+  lambda_tex_cycle: 1.0
+  lambda_tex_domain: 5.0
+  lambda_tex_l1: 0.0
+  texture_vgg_init: imagenet
+  allow_vgg_download: false
+  checkpoint_every: 500
+  log_every: 50
+  val_every: 1000
+  early_stop_patience: 0
+model:
+  warp_base_channels: 64
+  warp_cloth_bottleneck: 2
+  warp_res_blocks: 4
+  warp_skip: body
+  warp_max_channels: 1024
+  warp_norm: instance
+  warp_dropout: 0.0
+  disc_layers: 3
+  texture_corr_size: 32
+  texture_alpha: 100.0
+  texture_feat_channels: 256
+  texture_exemplar_parsing: true
+  texture_norm: positional
+  disc_scales: 2
+  generator_base_channels: 64
+  discriminator_base_channels: 64
+  spectral_norm: true
