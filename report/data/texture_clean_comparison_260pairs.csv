@@ -1,0 +1,4 @@
+texture_model,train_steps,train_pairs,pairs,region,ssim_with_gt_layout,l1_with_gt_layout,e2e_ssim_with_warp_pf,e2e_l1_with_warp_pf,source
+texture (baseline),2000,all same-item pairs,260 real cross-view val pairs (filtered),garments+skin of GT,0.5663,0.0996,0.4365,0.1331,Colab session A (f4d10d5)
+texture_pf,13000,pair filter dE<=15,260 real cross-view val pairs (filtered),garments+skin of GT,0.5758,0.0926,0.4416,0.1256,Colab session B
+copy exemplar (lower bound),-,-,260,garments+skin of GT,0.1950,0.2073,0.1950,0.2073,

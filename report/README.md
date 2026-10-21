@@ -100,6 +100,13 @@ and rerun `make_charts.py`.
 | End-to-end quality and where it is lost | `data/e2e_sessionA.csv` | full pipeline 0.437 SSIM; GT-layout upper bound 0.566; copy 0.195 |
 | Visual results | `private/colab/e2e_sessionA_val_grid.png`, `e2e_sessionA_swap_grid_part*.png` | — |
 
+### D-J. Texture with the pair filter (Colab session B) and a validation flaw
+| Evidence | File | Key numbers |
+|---|---|---|
+| Clean texture comparison on 260 real pose-change pairs | `data/texture_clean_comparison_260pairs.csv` | 0.566 → 0.576 SSIM; e2e 0.437 → 0.442 |
+| Why the training-time curve looked better than reality | `data/texture_pf_val_log_13k_metric_v2.csv`, `docs/problems_log.md` P26 | v2 mixed easy pseudo pairs into validation |
+| Curves and grids | `figures/colab_texture_pf_13k_curves.png`, `private/colab/texture_pf_13k_*`, `private/colab/e2e_sessionB_*` | — |
+
 ---
 
 ## 2. Thresholds and settings used (and why)

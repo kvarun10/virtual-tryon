@@ -34,6 +34,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from PIL import Image
+from torch.utils.data import Subset
 
 from src.config import load_config, save_config
 from src.data.labels import get_label_set
@@ -50,7 +51,7 @@ from src.utils.paths import ProjectPaths
 class TextureTrainer(GANTrainer):
     stage = "texture"
     score_key = "ssim_fg"  # SSIM over the person region (white background excluded)
-    metric_version = 2  # v2: best.pt selected by person-region SSIM (v1: whole-image SSIM)
+    metric_version = 3  # v3: real cross-view pairs only (v2 mixed in easy pseudo pairs; v1: whole-image SSIM)
 
     def build(self, vgg: Optional[VGGPerceptualLoss] = None) -> None:
         cfg, t = self.cfg, self.t
@@ -58,8 +59,14 @@ class TextureTrainer(GANTrainer):
         self.G_labels = get_label_set(cfg.labels.garment_label_set)
         K = self.G_labels.num_classes
         self.train_ds = TextureDataset(self.prepared, "train", cfg, train=True)
-        # validation: real pose change only (pseudo pairs would make SSIM look better than try-on reality)
         self.val_ds = TextureDataset(self.prepared, "val", cfg, train=False, cross_view_prob=1.0)
+        # Validation scores REAL pose-change pairs only. A photo without a (filtered) same-outfit partner would
+        # otherwise become a pseudo pair (its own distorted copy), an easier task that inflated metric v2.
+        real = [i for i in range(len(self.val_ds)) if self.val_ds.siblings[i]]
+        if not real:
+            print("WARNING: no cross-view validation pairs; validating on pseudo pairs (not comparable)")
+        self.val_pairs_kind = "cross-view pairs" if real else "PSEUDO pairs"
+        self.val_eval_ds = Subset(self.val_ds, real) if real else self.val_ds
         self.swap_ds = TextureSwapDataset(self.val_ds, n=8, seed=cfg.experiment.seed)
         self.gen = build_texture_generator(cfg, K).to(self.device)
         self.disc = MultiScaleDiscriminator(3 + K, cfg.model.discriminator_base_channels, cfg.model.disc_layers,
@@ -149,7 +156,7 @@ class TextureTrainer(GANTrainer):
         acc = {k: [] for k in ("ssim", "ssim_fg", "l1", "l1_fg", "warp_l1", "copy_ssim", "copy_ssim_fg", "copy_l1_fg",
                                "is_ssim", "is_ssim_fg", "is_l1_fg")}
         first, n = None, 0
-        for i, batch in enumerate(self.val_loader(self.val_ds)):
+        for i, batch in enumerate(self.val_loader(self.val_eval_ds)):
             if limit is not None and i >= limit:
                 break
             out = self.generate(batch)
@@ -177,11 +184,12 @@ class TextureTrainer(GANTrainer):
             n += real01.shape[0]
             if first is None:
                 first = (batch, out)
-        metrics = {"kind": kind, "step": self.step, "n_images": n, "metric_version": self.metric_version}
+        metrics = {"kind": kind, "step": self.step, "n_images": n, "pair_type": self.val_pairs_kind,
+                   "metric_version": self.metric_version}
         metrics.update({k: float(np.mean(v)) for k, v in acc.items() if v})
         self.log.log(metrics)
         self._print(
-            f"[{kind}] step {self.step} ({n} cross-view pairs): SSIM {metrics['ssim']:.4f} | person-region SSIM "
+            f"[{kind}] step {self.step} ({n} {self.val_pairs_kind}): SSIM {metrics['ssim']:.4f} | person-region SSIM "
             f"{metrics['ssim_fg']:.4f} L1 {metrics['l1_fg']:.4f}\n"
             f"      baselines (person region): copy exemplar SSIM {metrics['copy_ssim_fg']:.4f} L1 {metrics['copy_l1_fg']:.4f} "
             f"| warped I_S only SSIM {metrics['is_ssim_fg']:.4f} L1 {metrics['is_l1_fg']:.4f}")
