@@ -522,7 +522,7 @@ This choice should be made before Phase 4 training; it is listed in §10.5.
 | Parser output cache | done, tested |
 | Garment-only preprocessing (plain-background removal + user category) | experimental, tested on synthetic product images only |
 | Stage B warp network (Phase 4) | implemented and unit-tested (88 tests incl. exact resume and overfit-one-batch); **not trained on real data** |
-| Stage C texture network | **not implemented** (Phase 5) |
+| Stage C texture network (Phase 5) | implemented and unit-tested (correspondence maths, FP32 under autocast, exact resume, overfit SSIM 0.994); **not trained on real data** |
 
 ### 10.5 Decisions still open (in addition to §8)
 
