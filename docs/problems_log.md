@@ -31,7 +31,7 @@ Evidence paths refer to `report/` (numbers, charts), `docs/`, and `tests/`. Date
 | P18 | 10-21 | Repo | Word lock file nearly committed; doc locked while open in Word | fixed |
 | P19 | 10-21 | Stage B | Warp weakest on outer (0.56) and skirt (0.63); long garments drawn short | open |
 | P20 | 10-21 | Metrics | Texture SSIM 0.876 is hard to judge (white background inflates it) | fixed (needs re-run) |
-| P21 | 10-21 | Data | "Same item ID" does not mean "same outfit" | mitigated (needs measurement) |
+| P21 | 10-21 | Data | "Same item ID" does not mean "same outfit" (82% of pairs cross photo sets) | decided (filter), effect pending |
 | P22 | 10-21 | Stage C | Texture discriminator barely discriminates yet (hinge d ≈ 2) | open (monitor) |
 | P23 | 10-21 | Stage C | Generated faces belong to the exemplar person | by design (Phase 6) |
 | P24 | 10-21 | Tooling | CPU dry run would have needed a 548 MB VGG download | fixed |
@@ -173,7 +173,16 @@ Evidence paths refer to `report/` (numbers, charts), `docs/`, and `tests/`. Date
   more inconsistency than outfit changes alone explain. Hypotheses under test: (a) the photo-set number in the
   file name (`-01_`, `-02_`) marks different shoots or colourways; (b) the max-over-garments ΔE is dominated
   by small regions such as shoes.
-* **Status:** mitigated in code; filter rule pending the breakdown analysis.
+* **Breakdown (offline, from the downloaded pair table):** the photo-set number explains it. Same-set pairs
+  (2,961): median max ΔE **3.8**. Different-set pairs (13,068, 82%): median **57.5**. 1,654 of 2,701 items have
+  more than one photo set, i.e. one product in several colourways or outfits. A third of same-set pairs still differ
+  in garment classes, mostly because shoes, top or trousers are cropped or hidden in close-up, back and side views
+  (`report/data/pair_quality_breakdown.json`, `report/figures/pair_delta_e_by_photo_set.png`).
+* **Decision:** filter `classes_color`, max ΔE ≤ **15**, which lies between the 95th (11.7) and 99th (17.1) percentile
+  of trusted same-outfit pairs. It keeps 2,537 of 16,029 pairs (15.8%); images with a usable partner drop 8,500 → 3,131.
+  The rest train with self-supervised (warp) or pseudo (texture) pairs. Config: `configs/colab_pairfilter.yaml`.
+  Evaluated against the unfiltered baseline on the same filtered validation pairs.
+* **Status:** decided; effect to be measured in the next Colab session.
 
 ### P22 – Weak texture discriminator (Phase 5)
 * **Evidence:** hinge `d` stayed at 1.7–2.1 over 2,000 steps (2.0 = cannot tell real from fake); `g_adv` 0–0.7 (`report/data/texture_train_log_2k.csv`).

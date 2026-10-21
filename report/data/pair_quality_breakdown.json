@@ -1,0 +1,71 @@
+{
+ "source": "pair table from Colab Section 6b (commit a590a0d), analysed offline 2026-10-21; aggregates only",
+ "pairs_total": 16029,
+ "items": 2701,
+ "same_photo_set": {
+  "pairs": 2961,
+  "share_same_classes": 0.6565,
+  "max_delta_e_q25_q50_q75": [
+   2.16,
+   3.77,
+   5.98
+  ]
+ },
+ "different_photo_set": {
+  "pairs": 13068,
+  "share_same_classes": 0.7445,
+  "max_delta_e_q25_q50_q75": [
+   36.15,
+   57.5,
+   72.81
+  ]
+ },
+ "items_by_number_of_photo_sets": "1: 654, 2: 1304, 3: 409, 4+: 334 (max 35)",
+ "same_set_class_mismatch_causes": {
+  "pairs": 1017,
+  "garment_visible_in_only_one_photo": {
+   "footwear": 540,
+   "top": 267,
+   "pants": 238,
+   "outer": 135,
+   "dress": 36,
+   "skirt": 24
+  },
+  "top_view_combinations": {
+   "1_front+7_additional": 217,
+   "1_front+3_back": 163,
+   "1_front+2_side": 159
+  }
+ },
+ "threshold_derivation": {
+  "trusted_pairs": "same photo set and same garment classes",
+  "n": 1944,
+  "max_delta_e_quantiles": {
+   "0.5": 4.0,
+   "0.9": 9.6,
+   "0.95": 11.7,
+   "0.99": 17.1
+  },
+  "chosen_threshold": 15,
+  "reason": "between the 95th and 99th percentile of trusted same-outfit pairs"
+ },
+ "rules": {
+  "none": {
+   "pairs": 16029,
+   "images_with_partner": 8500
+  },
+  "same_seq": {
+   "pairs": 2961,
+   "images_with_partner": 3151
+  },
+  "same_seq + same classes": {
+   "pairs": 1944,
+   "images_with_partner": 2375
+  },
+  "classes_color max dE<=15 (CHOSEN)": {
+   "pairs": 2537,
+   "images_with_partner": 3131
+  }
+ },
+ "different_set_same_class_pairs_passing_dE15": 0.065
+}

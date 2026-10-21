@@ -1,0 +1,18 @@
+# Baseline + same-outfit pair filter (decision 2026-10-21, docs/problems_log.md P21).
+# Only cross-view pairs with identical garment classes and max colour difference <= 15 CIE76 dE are used.
+# 15 lies between the 95th (11.7) and 99th (17.1) percentile of trusted same-outfit pairs
+# (same photo set + same classes). See report/data/pair_quality_breakdown.json.
+# Needs the pair table <drive>/cache/pairs/deepfashion_multimodal_pair_quality.csv (notebook Section 6b).
+_base_: colab_baseline.yaml
+
+experiment:
+  name: baseline_128            # same experiment folder: the baseline warp/texture runs stay next to these
+
+data:
+  pair_filter: classes_color
+  pair_max_delta_e: 15.0
+  pair_color_metric: max
+
+training:
+  warp_run_name: warp_pf        # checkpoints/baseline_128/warp_pf (baseline stays in .../warp)
+  texture_run_name: texture_pf  # checkpoints/baseline_128/texture_pf (baseline stays in .../texture)

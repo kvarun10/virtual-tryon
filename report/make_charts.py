@@ -132,7 +132,20 @@ def texture_overfit():
     save(fig, "texture_overfit_one_batch.png")
 
 
+def pair_photo_sets():
+    r = rows("pair_delta_e_hist_by_photo_set.csv")
+    x = [f(v["delta_e_bin_start"]) + 2.5 for v in r]
+    fig, ax = plt.subplots(figsize=(6.5, 3.2))
+    ax.bar([v - 1.2 for v in x], [f(v["same_photo_set"]) for v in r], 2.4, label="same photo set (2,961 pairs)", color="#1f77b4")
+    ax.bar([v + 1.2 for v in x], [f(v["different_photo_set"]) for v in r], 2.4, label="different photo sets (13,068 pairs)", color="#c0392b")
+    ax.axvline(15, color="k", ls=":", lw=1); ax.text(16, ax.get_ylim()[1] * 0.85, "chosen limit ΔE 15", fontsize=7)
+    ax.set_xlabel("max colour difference of shared garments (CIE76 ΔE, 5-unit bins, >100 clipped)"); ax.set_ylabel("pairs")
+    ax.set_title("Same DeepFashion item ID: photos from different photo sets show different outfits")
+    ax.legend(fontsize=8)
+    save(fig, "pair_delta_e_by_photo_set.png")
+
+
 if __name__ == "__main__":
     FIG.mkdir(exist_ok=True)
-    for fn in (warp_metric_bug, warp_per_class_over_steps, warp_eval_bars, warp_losses, warp_swap, silhouette_leak, overfit, texture_overfit):
+    for fn in (warp_metric_bug, warp_per_class_over_steps, warp_eval_bars, warp_losses, warp_swap, silhouette_leak, overfit, texture_overfit, pair_photo_sets):
         fn()
