@@ -202,3 +202,15 @@ Not verified: any end-to-end result on real data (needs the next Colab session).
 Real-data texture evaluation (step 2,000, full val, 1,271 pairs, commit a590a0d): person-region SSIM 0.540 vs
 baselines 0.384 (warped I_S only) and 0.125 (copy exemplar); whole-image SSIM 0.883.
 Pair analysis: 16,029 same-item pairs, 72.8% identical garment classes, median max ΔE 49 (problems_log P21).
+
+## Colab session A (2026-10-21, commit f4d10d5): filtered warp + first real end-to-end try-on
+
+* `warp_pf` (pair filter ΔE ≤ 15): 10,000 steps in 37.1 min (0.13–0.22 s/step); 2,514 of 10,160 train images had a
+  consistent cross-view partner.
+* Full validation (1,271 images, same filtered pairs for both): mIoU 0.715 (filtered) vs 0.716 (baseline);
+  swap area agreement **0.879 vs 0.842**, class fidelity 0.985 vs 0.958. `warp_pf` becomes the warp baseline.
+* **First end-to-end try-on on real data** (260 filtered val pairs; warp_pf + texture baseline at only 2,000 steps),
+  garment + skin region: SSIM 0.437 (pasted 0.443), texture with ground-truth layout 0.566, copying the exemplar 0.195;
+  warp mIoU on these pairs 0.655. Warp errors cost ~0.13 SSIM; the texture stage itself is still short-trained.
+* Visual: garments move onto new poses and the target's face is kept (grids in `report/private/colab/e2e_sessionA_*`).
+  Detail is limited at 128 px; jumpsuits and dresses keep their colour; the texture stage blurs patterns.

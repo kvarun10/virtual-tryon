@@ -62,7 +62,7 @@ def atomic_save(obj: Dict, path: Path) -> Path:
 
 
 class CheckpointManager:
-    def __init__(self, directory: Path, keep: int = 3):
+    def __init__(self, directory: Path, keep: int = 1):  # 1 snapshot: last.pt is atomic; a warp checkpoint is ~0.8 GB
         self.dir = Path(directory)
         self.keep = keep
 
@@ -101,3 +101,38 @@ class CheckpointManager:
                 "Use another experiment.name or delete the checkpoint folder to start fresh."
             )
         return state
+
+
+def verify_checkpoint(path: Path) -> Dict:
+    """Fully load a checkpoint (catches truncated / incomplete files) and report its step and size."""
+    path = Path(path)
+    st = torch.load(path, map_location="cpu", weights_only=True)
+    n = sum(v.numel() for v in st["gen"].values())
+    return {"path": str(path), "step": int(st["step"]), "MiB": round(path.stat().st_size / 2**20, 1), "gen_tensors_M": round(n / 1e6, 1)}
+
+
+def export_generator(path: Path, out: Path = None) -> Path:
+    """Write a small inference-only copy (generator weights + signature + step, fp32) next to the checkpoint."""
+    path = Path(path)
+    st = torch.load(path, map_location="cpu", weights_only=True)
+    out = Path(out) if out else path.with_name("generator_only.pt")
+    atomic_save({"gen": st["gen"], "signature": st.get("signature", {}), "step": st["step"],
+                 "metric_version": st.get("metric_version"), "config": st.get("config")}, out)
+    return out
+
+
+def prune_snapshots(run_dir: Path, dry_run: bool = False) -> Dict:
+    """Delete ``step_*.pt`` snapshots of a run, but only after ``last.pt`` has been fully loaded.
+
+    ``last.pt`` and ``best.pt`` are always kept. Returns what was (or would be) removed.
+    """
+    run_dir = Path(run_dir)
+    last = run_dir / "last.pt"
+    info = verify_checkpoint(last)  # raises if last.pt is missing or unreadable -> nothing is deleted
+    snaps = sorted(run_dir.glob("step_*.pt"))
+    freed = sum(p.stat().st_size for p in snaps)
+    if not dry_run:
+        for p in snaps:
+            p.unlink()
+    return {"run": run_dir.name, "last_step": info["step"], "removed": [p.name for p in snaps],
+            "freed_MiB": round(freed / 2**20, 1), "dry_run": dry_run}

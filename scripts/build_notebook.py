@@ -78,6 +78,9 @@ TRYON_WARP_CKPT = "last"           # last | best | path
 TRYON_TEXTURE_CKPT = "last"
 TRYON_EVAL_LIMIT = None            # None = all validation pairs
 EXPORT_RESULTS = True              # copy all logs/metrics/grids of this session to <drive>/report_exports (Section 14)
+SECURE_RESULTS = True              # verify every checkpoint loads, save small generator-only backups (Section 14)
+PRUNE_SNAPSHOTS = False            # True: delete redundant step_*.pt snapshots after verification (keeps last.pt + best.pt)
+FLUSH_DRIVE_AT_END = True          # push all pending writes to Drive; after this it is safe to delete the runtime
 """)
 
 md(r"""
@@ -627,6 +630,52 @@ for p in [out_dir / "config_resolved.yaml", Path(cfg.data.split_file),
 # Reload check: the saved config must reproduce the same settings in a fresh runtime
 assert load_config(out_dir / "config_resolved.yaml").to_dict() == cfg.to_dict()
 print("saved config reloads identically")
+""")
+
+
+md(r"""
+## 15. Secure the results (run before deleting the runtime)
+1. Every `last.pt` / `best.pt` is **fully loaded**, which catches incomplete files (for example when Drive is full).
+2. A small `generator_only.pt` backup is written next to it (inference needs only this).
+3. Redundant `step_*.pt` snapshots are deleted, but only if `last.pt` loaded correctly. A full warp checkpoint is ~0.8 GB.
+4. Drive usage is shown, then all pending writes are flushed to Drive.
+
+When this cell prints **`SAFE TO DELETE RUNTIME`**, everything trained in this session is permanently in your Drive.
+""")
+code(r"""
+if SECURE_RESULTS and not DRY_RUN:
+    from src.training.checkpointing import verify_checkpoint, export_generator, prune_snapshots
+    ckroot = Path(cfg.paths.checkpoints_dir) / cfg.experiment.name
+    problems = []
+    for run in sorted(d for d in ckroot.iterdir() if d.is_dir()):
+        for name in ("last.pt", "best.pt"):
+            f = run / name
+            if not f.is_file():
+                continue
+            try:
+                info = verify_checkpoint(f)
+                print(f"OK   {run.name}/{name}: step {info['step']}, {info['MiB']} MiB")
+                if name == "last.pt":
+                    g = export_generator(f)
+                    print(f"     backup {run.name}/{g.name}: {g.stat().st_size / 2**20:.0f} MiB")
+            except Exception as exc:
+                problems.append(f"{run.name}/{name}: {type(exc).__name__}: {exc}")
+                print("FAIL", problems[-1])
+        if PRUNE_SNAPSHOTS and (run / "last.pt").is_file() and not any(run.name in p for p in problems):
+            r = prune_snapshots(run)
+            if r["removed"]:
+                print(f"     pruned {len(r['removed'])} snapshot(s) in {run.name}, freed {r['freed_MiB']} MiB")
+    import shutil as _sh
+    tot, used, free = _sh.disk_usage(DRIVE_PROJECT_ROOT)
+    print(f"Drive: {used / 2**30:.1f} GB used of {tot / 2**30:.1f} GB ({free / 2**30:.1f} GB free)")
+    if problems:
+        print("\n!!! NOT SAFE: fix the problems above (free Drive space, then re-run the training cell to re-save).")
+    if FLUSH_DRIVE_AT_END and IN_COLAB and not problems:
+        from google.colab import drive
+        drive.flush_and_unmount()
+        print("\nDrive flushed and unmounted. SAFE TO DELETE RUNTIME.")
+else:
+    print("Skipped (SECURE_RESULTS=False or DRY_RUN).")
 """)
 
 nb = nbf.v4.new_notebook(cells=cells, metadata={
