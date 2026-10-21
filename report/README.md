@@ -89,6 +89,8 @@ and rerun `make_charts.py`.
 | Whole-image SSIM is inflated by background | `data/texture_eval_step2000_fullval.csv` | whole 0.883 vs person region 0.540 |
 | The generator adds value over simpler methods | same | person-region SSIM: copy 0.125, warped I_S 0.384, full texture stage 0.540 |
 | Same item ID ≠ same outfit | `data/pair_quality_summary_dfmm.json` | 16,029 pairs: 72.8% same garment classes; median max ΔE 49; 15.8% pass classes + ΔE ≤ 15 |
+| Cause: photo sets (`-01_` vs `-02_`) | `data/pair_quality_breakdown.json`, `data/pair_delta_e_hist_by_photo_set.csv`, `figures/pair_delta_e_by_photo_set.png` | same set median ΔE 3.8 vs different sets 57.5 |
+| Threshold ΔE 15 from the data | same | 95th / 99th percentile of trusted same-outfit pairs: 11.7 / 17.1 |
 | Visual evidence (rows 2–3: different outfits under one item ID) | `private/colab/texture_step2000_val_grid_part1.png` | — |
 
 ---

@@ -15,7 +15,7 @@ def test_defaults_valid():
     assert cfg.data.root.endswith("datasets/DeepFashion-MultiModal")  # placeholders resolved
 
 
-@pytest.mark.parametrize("name", ["colab_smoke_test.yaml", "colab_baseline.yaml", "extended_training.yaml"])
+@pytest.mark.parametrize("name", ["colab_smoke_test.yaml", "colab_baseline.yaml", "extended_training.yaml", "colab_pairfilter.yaml"])
 def test_shipped_configs_load(name):
     cfg = load_config(ROOT / "configs" / name)
     assert "{" not in cfg.data.split_file and "{" not in cfg.paths.cache_dir
@@ -71,7 +71,7 @@ def test_circular_base(tmp_path):
         load_config(tmp_path / "a.yaml")
 
 
-@pytest.mark.parametrize("name", ["colab_smoke_test.yaml", "colab_baseline.yaml", "extended_training.yaml"])
+@pytest.mark.parametrize("name", ["colab_smoke_test.yaml", "colab_baseline.yaml", "extended_training.yaml", "colab_pairfilter.yaml"])
 def test_shipped_configs_name_valid_backends(name):
     from src.models.segmentation import BACKENDS
 
