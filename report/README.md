@@ -93,6 +93,13 @@ and rerun `make_charts.py`.
 | Threshold ΔE 15 from the data | same | 95th / 99th percentile of trusted same-outfit pairs: 11.7 / 17.1 |
 | Visual evidence (rows 2–3: different outfits under one item ID) | `private/colab/texture_step2000_val_grid_part1.png` | — |
 
+### D-I. Pair filter effect and first end-to-end try-on (Colab session A)
+| Evidence | File | Key numbers |
+|---|---|---|
+| Filter keeps accuracy, improves try-on faithfulness | `data/warp_pairfilter_vs_baseline_fullval.csv` | mIoU 0.715 vs 0.716; swap area agreement 0.879 vs 0.842 |
+| End-to-end quality and where it is lost | `data/e2e_sessionA.csv` | full pipeline 0.437 SSIM; GT-layout upper bound 0.566; copy 0.195 |
+| Visual results | `private/colab/e2e_sessionA_val_grid.png`, `e2e_sessionA_swap_grid_part*.png` | — |
+
 ---
 
 ## 2. Thresholds and settings used (and why)

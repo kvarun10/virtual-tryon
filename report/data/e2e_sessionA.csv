@@ -1,0 +1,6 @@
+variant,pairs,region,ssim,l1_0to1,warp_ckpt,texture_ckpt,commit,note
+end-to-end (warp layout -> texture),260,garments+skin of GT,0.4365,0.1331,warp_pf step 10000,texture (baseline) step 2000,f4d10d5,the real pipeline
+end-to-end + face/hair paste,260,garments+skin of GT,0.4429,0.1321,warp_pf step 10000,texture (baseline) step 2000,f4d10d5,paste touches only region borders
+texture with ground-truth layout (upper bound),260,garments+skin of GT,0.5663,0.0996,-,texture (baseline) step 2000,f4d10d5,cost of warp errors = 0.13 SSIM
+copy exemplar (lower bound),260,garments+skin of GT,0.1950,0.2073,-,-,f4d10d5,
+warp mIoU on these pairs,260,7 trained classes,0.6551,,warp_pf step 10000,-,f4d10d5,

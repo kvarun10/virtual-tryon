@@ -1,0 +1,3 @@
+run,training_pairs,step,val_images,val_pair_filter,miou_trained7,skin,top,outer,dress,skirt,pants,footwear,swap_area_agreement,swap_class_fidelity,val_ce,pixel_acc,train_minutes,commit
+warp (baseline: all same-item pairs),6812 images with partner,10000,1271,classes_color dE<=15,0.7160,0.69,0.78,0.59,0.78,0.71,0.82,0.63,0.842,0.958,0.1646,0.9735,~40,f4d10d5
+warp_pf (pair filter dE<=15),2514 images with partner,10000,1271,classes_color dE<=15,0.7149,0.69,0.77,0.59,0.78,0.72,0.82,0.63,0.879,0.985,0.1643,0.9731,37.1,f4d10d5

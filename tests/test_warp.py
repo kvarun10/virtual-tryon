@@ -369,3 +369,37 @@ def test_run_name_separates_checkpoint_folders(tmp_path):
     b = WarpTrainer(cfg_for(tmp_path, "training.warp_run_name=warp_pairfilter"), verbose=False)
     assert a.ckpt.dir.name == "warp" and b.ckpt.dir.name == "warp_pairfilter"
     assert a.ckpt.dir.parent == b.ckpt.dir.parent
+
+
+def test_verify_export_and_prune_checkpoints(tmp_path):
+    from src.training.checkpointing import export_generator, prune_snapshots, verify_checkpoint
+
+    t = WarpTrainer(cfg_for(tmp_path, "training.checkpoint_every=1", "training.val_every=1000"), verbose=False)
+    t.ckpt.keep = 3
+    t.fit(max_steps=3, resume=False)
+    run = t.ckpt.dir
+    assert len(list(run.glob("step_*.pt"))) == 3
+    assert verify_checkpoint(run / "last.pt")["step"] == 3
+    gen_only = export_generator(run / "last.pt")
+    st = torch.load(gen_only, weights_only=True)
+    assert set(st) >= {"gen", "signature", "step"} and "opt_g" not in st and gen_only.stat().st_size < (run / "last.pt").stat().st_size
+    assert prune_snapshots(run, dry_run=True)["removed"] and len(list(run.glob("step_*.pt"))) == 3
+    out = prune_snapshots(run)
+    assert out["last_step"] == 3 and not list(run.glob("step_*.pt")) and (run / "last.pt").is_file()
+    (run / "last.pt").write_bytes(b"truncated")  # an unreadable last.pt must block deletion
+    (run / "step_0000009.pt").write_bytes(b"x")
+    with pytest.raises(Exception):
+        prune_snapshots(run)
+    assert (run / "step_0000009.pt").is_file()
+
+
+def test_tryon_loads_generator_only_file(tmp_path):
+    from src.inference.tryon import _load_generator
+    from src.models.warp_network import build_warp_generator
+    from src.training.checkpointing import export_generator
+
+    t = WarpTrainer(cfg_for(tmp_path), verbose=False)
+    t.fit(max_steps=1, resume=False)
+    gen_only = export_generator(t.ckpt.last)
+    g = build_warp_generator(t.cfg, 12, t.train_ds.Kb, 12)
+    assert _load_generator(g, gen_only, "warp")["step"] == 1
