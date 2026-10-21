@@ -174,3 +174,11 @@ long garments are drawn too short or split along the legs on targets with visibl
 * No texture training on real data; no real SSIM numbers; T4 speed and memory unknown for the 27 M generator.
 * VGG-19 ImageNet weights not downloaded yet (needs `ALLOW_VGG_DOWNLOAD=True` once, ~548 MB).
 * End-to-end try-on (warp output → texture) is Phase 6.
+
+### Phase 5 follow-up (2026-10-21, after the first 2,000-step texture run)
+
+Real-data texture run: 0.34–0.36 s/step on T4; val SSIM 0.868 (step 1,000) → 0.876 (step 2,000), whole image,
+400 cross-view pairs. Two problems were found (docs/problems_log.md P20, P21) and addressed in code:
+* validation now reports person-region SSIM/L1 and two baselines (copy exemplar; warped I_S only); `best.pt`
+  is selected by person-region SSIM (texture metric v2). Real numbers need a Colab re-evaluation;
+* pair-consistency analysis + optional `data.pair_filter` (off by default). The DFMM statistics need the Colab run (Section 6b).

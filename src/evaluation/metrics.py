@@ -77,11 +77,13 @@ def _gaussian_window(size: int = 11, sigma: float = 1.5):
     return (g[:, None] * g[None, :])[None, None]
 
 
-def ssim(img1, img2, data_range: float = 1.0, window: int = 11, sigma: float = 1.5):
+def ssim(img1, img2, data_range: float = 1.0, window: int = 11, sigma: float = 1.5, mask=None):
     """Mean SSIM per image (Wang et al. 2004): Gaussian 11x11 window, sigma 1.5, K1 = 0.01, K2 = 0.03.
 
     ``img1``, ``img2``: torch tensors [B, 3, H, W] in [0, data_range]. Channels are averaged.
     Returns a tensor [B]. Use only with a real paired reference image (e.g. cross-view validation pairs).
+    With ``mask`` the SSIM map is averaged over masked pixels only (e.g. excluding plain white background,
+    which otherwise inflates the score).
     """
     import torch
     import torch.nn.functional as F
@@ -99,5 +101,9 @@ def ssim(img1, img2, data_range: float = 1.0, window: int = 11, sigma: float = 1
     sxy = F.conv2d(x * y, w, padding=pad, groups=c) - mu_x * mu_y
     c1, c2 = (0.01 * data_range) ** 2, (0.03 * data_range) ** 2
     m = ((2 * mu_x * mu_y + c1) * (2 * sxy + c2)) / ((mu_x ** 2 + mu_y ** 2 + c1) * (sxx + syy + c2))
-    m = m[..., pad:-pad, pad:-pad]  # drop borders affected by zero padding
-    return m.flatten(1).mean(1)
+    m = m.mean(1)[..., pad:-pad, pad:-pad]  # channel mean; drop borders affected by zero padding -> [B, H', W']
+    if mask is None:
+        return m.flatten(1).mean(1)
+    # ``mask`` [B, H, W] bool (e.g. the person region): average the SSIM map over masked pixels only.
+    mk = mask[..., pad:-pad, pad:-pad].to(m.dtype)
+    return (m * mk).flatten(1).sum(1) / mk.flatten(1).sum(1).clamp(min=1)

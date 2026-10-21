@@ -221,3 +221,23 @@ def test_texture_overfit_one_batch(tmp_path):
     s = ssim((fake + 1) / 2, (b["image"] + 1) / 2).mean().item()
     assert loss.item() < 0.25 * first, f"L1 {first:.3f} -> {loss.item():.3f}"
     assert s > 0.8, f"SSIM after overfitting only {s:.3f}"
+
+
+def test_masked_ssim_ignores_background():
+    real = torch.ones(1, 3, 40, 40)  # white background
+    real[:, :, 10:30, 10:30] = torch.rand(1, 3, 20, 20)  # the "person"
+    fake = real.clone()
+    fake[:, :, 10:30, 10:30] = torch.rand(1, 3, 20, 20)  # wrong person, same background
+    mask = torch.zeros(1, 40, 40, dtype=torch.bool)
+    mask[:, 10:30, 10:30] = True
+    whole, person = ssim(fake, real).item(), ssim(fake, real, mask=mask).item()
+    assert whole > person + 0.2, f"background should inflate whole-image SSIM ({whole:.2f} vs {person:.2f})"
+    assert ssim(real, real, mask=mask).item() == pytest.approx(1.0)
+
+
+def test_validation_reports_baselines(tmp_path):
+    t = TextureTrainer(cfg_for(tmp_path), verbose=False)
+    m = t.validate(max_batches=1, save_grid=False)
+    for k in ("ssim", "ssim_fg", "l1_fg", "copy_ssim_fg", "copy_l1_fg", "is_ssim_fg", "is_l1_fg"):
+        assert k in m and np.isfinite(m[k])
+    assert t.score_key == "ssim_fg" and t.metric_version == 2

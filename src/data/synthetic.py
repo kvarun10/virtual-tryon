@@ -47,6 +47,7 @@ class FixtureSpec:
     corrupt_images: int = 0  # write N undecodable JPGs (validation tests)
     drop_densepose: int = 0  # delete DensePose for N images (missing-file tests)
     orphan_parsing: int = 0  # write N parsing files without an image
+    outfit_change_items: int = 0  # first N items: views after the first wear a DIFFERENT outfit (DeepFashion-like noise)
 
 
 def _rect(draws, box, seg_label, dp_label, color):
@@ -152,7 +153,11 @@ def make_fixture(root: Path, spec: Optional[FixtureSpec] = None) -> Dict:
             name = f"{gender}-{cat}-id_{90000000 + item:08d}-01_{view}"
             x0 = spec.width / 2 + rng.uniform(-12, 12)
             scale = rng.uniform(0.9, 1.0)
-            rgb, seg, dpi = _draw_person((spec.width, spec.height), x0, scale, garment, rng)
+            outfit = garment
+            if item < spec.outfit_change_items and v > 0:  # same item ID, other clothes (e.g. the item is an accessory)
+                outfit = {**garment, "top_color": tuple(255 - c for c in garment["top_color"]),
+                          "lower": "skirt" if garment["lower"] == "pants" else "pants"}
+            rgb, seg, dpi = _draw_person((spec.width, spec.height), x0, scale, outfit, rng)
             Image.fromarray(rgb).save(root / "images" / f"{name}.jpg", quality=92)
             if rng.random() < spec.parsing_fraction:
                 Image.fromarray(seg).save(root / "segm" / f"{name}_segm.png")
