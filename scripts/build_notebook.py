@@ -25,6 +25,7 @@ Research implementation of **"Dress-up: deep neural framework for image-based hu
 | A. Pre-treatment (clothing + body segmentation) | implemented: pretrained SCHP substitutes for LIP-JppNet / NBF, DFMM annotations |
 | B. Warp network (dual-path U-Net) | implemented and unit-tested (Phase 4); **not yet trained on real data** |
 | C. Texture network (alignment + SPADE) | implemented and unit-tested (Phase 5); **not yet trained on real data** |
+| End-to-end try-on (Phase 6) | implemented and tested; trained models from Sections 10/10b |
 | Garment-only (product photo) references | experimental preprocessing only; no compatible warp model |
 
 Every section can be read on its own. Run the cells from top to bottom. Nothing heavy runs automatically. Downloads only happen if you allow them in the settings cell.
@@ -44,6 +45,7 @@ DRIVE_PROJECT_ROOT = "/content/drive/MyDrive/VirtualTryOn"
 
 # --- what to run ---------------------------------------------------------------------
 DRY_RUN = True                      # True: synthetic fixture, CPU is fine, no downloads
+REQUIRE_GPU = True                  # False: allow a CPU runtime for GPU-free work (pair analysis, export) to save T4 quota
 CONFIG_FILE = "configs/colab_smoke_test.yaml" if DRY_RUN else "configs/colab_baseline.yaml"
 ALLOW_WEIGHT_DOWNLOAD = False       # True: fetch SCHP weights (~255 MiB each) from the authors' Google Drive
 EXTRA_OVERRIDES = []                # e.g. ["data.image_size=[256,256]", "data.max_samples=200"]
@@ -65,6 +67,17 @@ ALLOW_VGG_DOWNLOAD = False          # once: VGG-19 ImageNet weights (~548 MB) fo
 RUN_TEXTURE_TRAINING = False        # start/resume texture training (Section 10b)
 TEXTURE_MAX_STEPS = 2000            # total optimiser steps; re-running resumes
 EVAL_TEXTURE_CHECKPOINTS = []       # e.g. ["best", "last"]
+
+# --- time budgets: training stops cleanly (validate + save) after this many minutes; None = no limit ---
+WARP_TIME_LIMIT_MIN = None
+TEXTURE_TIME_LIMIT_MIN = None
+
+# --- Phase 6: end-to-end try-on ------------------------------------------------------------------
+RUN_TRYON_EVAL = False             # paired end-to-end evaluation + demo grids (Section 11)
+TRYON_WARP_CKPT = "last"           # last | best | path
+TRYON_TEXTURE_CKPT = "last"
+TRYON_EVAL_LIMIT = None            # None = all validation pairs
+EXPORT_RESULTS = True              # copy all logs/metrics/grids of this session to <drive>/report_exports (Section 14)
 """)
 
 md(r"""
@@ -99,9 +112,11 @@ if torch.cuda.is_available():
     print(f"GPU    : {p.name} | {total/2**30:.1f} GB total, {free/2**30:.1f} GB free | device cuda:0")
 else:
     print("GPU    : none -> device cpu")
-    if not DRY_RUN:
-        raise SystemExit("DRY_RUN=False needs a GPU runtime (Runtime > Change runtime type > GPU). "
-                         "Set DRY_RUN=True to run the CPU checks.")
+    if not DRY_RUN and REQUIRE_GPU:
+        raise SystemExit("This session needs a GPU runtime (Runtime > Change runtime type > GPU). For GPU-free work "
+                         "(pair analysis, exporting) set REQUIRE_GPU=False; for the CPU checks set DRY_RUN=True.")
+    if not REQUIRE_GPU:
+        print("CPU session: only run GPU-free steps (keep all training / evaluation flags False).")
 """)
 
 md("## 3. Google Drive setup\nMounting asks you to authorise access in a pop-up. Datasets, weights, checkpoints, caches and outputs live in separate folders under `DRIVE_PROJECT_ROOT` (see `src/utils/paths.py`).")
@@ -446,7 +461,7 @@ What to watch:
 """)
 code(r"""
 if RUN_WARP_TRAINING:
-    result = trainer.fit(max_steps=WARP_MAX_STEPS)
+    result = trainer.fit(max_steps=WARP_MAX_STEPS, time_limit_min=WARP_TIME_LIMIT_MIN)
     print(result)
 else:
     print("Skipped (RUN_WARP_TRAINING=False).")
@@ -500,7 +515,7 @@ What to watch:
 """)
 code(r"""
 if RUN_TEXTURE_TRAINING:
-    print(tex.fit(max_steps=TEXTURE_MAX_STEPS))
+    print(tex.fit(max_steps=TEXTURE_MAX_STEPS, time_limit_min=TEXTURE_TIME_LIMIT_MIN))
 else:
     print("Skipped (RUN_TEXTURE_TRAINING=False).")
 for which in EVAL_TEXTURE_CHECKPOINTS:
@@ -532,14 +547,77 @@ if tgrids:
     print(tgrids[-1].name); display(Image.open(tgrids[-1]))
 """)
 
+md(r"""
+## 11. End-to-end try-on (Phase 6)
+The full pipeline: Stage A, then warp (C'_seg), then the target's face/hair labels (paper Sec. 4.2), then texture, then the target's face/hair pixels pasted back.
+* **Paired evaluation** (validation pairs of the same item, the real photo is the answer): scored on garment + skin pixels only. Face/hair are pasted from the target, so they are excluded. Compared with the texture stage given the ground-truth layout (upper bound) and with copying the exemplar (lower bound).
+* **Swap grid:** real try-on between different items (no answer).
+* **Your own photos:** set `RUN_UPLOAD_TRYON=True`; uses SCHP for Stage A.
+""")
+code(r"""
+from src.inference.tryon import load_tryon_models
+from src.evaluation.end_to_end import evaluate_end_to_end, tryon_swap_grid
+e2e = None
+if RUN_TRYON_EVAL:
+    models = load_tryon_models(cfg, warp=TRYON_WARP_CKPT, texture=TRYON_TEXTURE_CKPT)
+    print("models:", models.info)
+    e2e_dir = paths.experiment_dir("outputs", cfg.experiment.name) / "tryon"; e2e_dir.mkdir(exist_ok=True)
+    e2e = evaluate_end_to_end(models, prepared, cfg, split="val", limit=TRYON_EVAL_LIMIT, grid_path=e2e_dir / "e2e_val_grid.png")
+    print({k: (round(v, 4) if isinstance(v, float) else v) for k, v in e2e.items()})
+    print("grid columns: reference | real target | C'_seg | layout+identity | warped I_S | generated | result (face pasted) | texture with GT layout")
+    display(Image.open(e2e_dir / "e2e_val_grid.png"))
+    if tryon_swap_grid(models, prepared, cfg, split="val", n=6, path=e2e_dir / "swap_grid.png") is not None:
+        print("swap grid columns: reference | target | C'_seg | warped I_S | generated | result")
+        display(Image.open(e2e_dir / "swap_grid.png"))
+    else:
+        print("No swap grid: the validation split has fewer than two items.")
+else:
+    print("Skipped (RUN_TRYON_EVAL=False).")
+""")
+code(r"""
+# Your own photos: reference (person wearing the garment) and target person. Uses SCHP for Stage A.
+RUN_UPLOAD_TRYON = False
+if RUN_UPLOAD_TRYON and IN_COLAB and RUN_TRYON_EVAL:
+    from google.colab import files
+    import io
+    up = files.upload()
+    (rn, rb), (tn, tb_) = list(up.items())[:2]
+    ref_u, tgt_u = load_image(Image.open(io.BytesIO(rb))), load_image(Image.open(io.BytesIO(tb_)))
+    r = try_on(ref_u, tgt_u, cfg, pretreatment=pre, models=models, save_dir=e2e_dir / "upload")
+    display(Image.open(e2e_dir / "upload" / "overview.png"))
+    print("columns: reference | C_seg | target | B_seg | C'_seg | layout | warped I_S | generated | result")
+""")
+
 for num, title, phase, body in [
-    (11, "End-to-end inference", 6, "Upload two images and see `I_C`, `I_B`, `C_seg`, `B_seg`, `C'_seg` and `I_G`. Demo mode and trained models will be clearly labelled."),
-    (12, "Evaluation", 7, "Fixed held-out sets. Mask metrics (mIoU, pixel accuracy) and image metrics (SSIM, LPIPS, FID) are kept separate. Published paper values are recorded only as references."),
+    (12, "Evaluation (FID, LPIPS)", 7, "Distribution metrics need thousands of generated images; added after the models are trained longer."),
     (13, "Experiments", 8, "Config-driven experiment runs and a comparison table (see `docs/experiments.md`)."),
 ]:
     md(f"## {num}. {title}\n**Not implemented yet. Planned for Phase {phase}.** {body}")
 
-md("## 14. Saving and exporting\nSaved so far: the resolved config, the data validation report, the split file, the pre-treatment example and the warp checkpoint (`last.pt` exists only after training has run). Texture weights and evaluation results come in later phases.")
+md("## 14. Saving and exporting\nWith `EXPORT_RESULTS=True` everything this session produced (training logs as CSV, evaluation metrics, grids, pair statistics) is copied to `<drive>/report_exports/<date-time>/`. Download that folder from Drive and put it in the project under `report/private/exports/`; no need to copy numbers by hand.")
+code(r"""
+if EXPORT_RESULTS and not DRY_RUN:
+    import shutil, datetime, json as _json
+    from scripts.export_run_logs import flatten, write
+    exp_dir = Path(DRIVE_PROJECT_ROOT) / "report_exports" / datetime.datetime.now().strftime("%Y%m%d_%H%M")
+    exp_dir.mkdir(parents=True, exist_ok=True)
+    for t in [x for x in (globals().get("trainer"), globals().get("tex")) if x is not None]:
+        recs = t.log.read()
+        write([flatten(r) for r in recs if r.get("kind") == "train"], exp_dir / f"{t.run_name}_train.csv")
+        write([flatten(r) for r in recs if r.get("kind", "").startswith(("val", "eval"))], exp_dir / f"{t.run_name}_val.csv")
+        for g in sorted(t.out_dir.glob("*.png"))[-3:]:
+            shutil.copy(g, exp_dir / f"{t.run_name}_{g.name}")
+    if globals().get("e2e"):
+        (exp_dir / "end_to_end_metrics.json").write_text(_json.dumps(e2e, indent=1, default=str))
+        for g in (Path(e2e["grid"]).parent).glob("*.png"):
+            shutil.copy(g, exp_dir / f"tryon_{g.name}")
+    pq = paths.experiment_dir("outputs", cfg.experiment.name) / "pair_quality"
+    if pq.is_dir():
+        shutil.copytree(pq, exp_dir / "pair_quality", dirs_exist_ok=True)
+    (exp_dir / "session_settings.json").write_text(_json.dumps({k: v for k, v in globals().items() if k.isupper() and isinstance(v, (int, float, str, list, bool, type(None)))}, indent=1))
+    print("exported to", exp_dir, ":", sorted(p.name for p in exp_dir.iterdir()))
+""")
+md("### Saved-artifact check")
 code(r"""
 out_dir = paths.experiment_dir("outputs", cfg.experiment.name)
 for p in [out_dir / "config_resolved.yaml", Path(cfg.data.split_file),

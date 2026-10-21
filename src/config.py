@@ -100,9 +100,10 @@ class DataConfig:
     index_file: str = "{cache_dir}/index/{dataset}_index.json"
     max_samples: Optional[int] = None  # cap per split (smoke tests)
     # Same-item pair filter (src/data/pair_quality.py); "none" keeps every same-item pair (baseline behaviour)
-    pair_filter: str = "none"  # none | classes | classes_color
+    pair_filter: str = "none"  # none | classes | classes_color | same_seq
     pair_table: str = "{cache_dir}/pairs/{dataset}_pair_quality.csv"
     pair_max_delta_e: float = 15.0  # CIE76 colour difference limit for classes_color
+    pair_color_metric: str = "max"  # max | weighted (area-weighted dE, robust to small regions such as shoes)
     image_check: str = "header"  # none | header | full  (full decodes every image)
     num_workers: int = 2
 
@@ -182,6 +183,9 @@ class TrainingConfig:  # warp fields used from Phase 4; texture fields reserved 
     log_every: int = 50
     val_every: int = 1000
     early_stop_patience: int = 0  # 0 disables
+    # Checkpoint sub-folder per stage: change to keep a variant next to the baseline (e.g. warp_pairfilter)
+    warp_run_name: str = "warp"
+    texture_run_name: str = "texture"
 
 
 @dataclass
@@ -352,8 +356,10 @@ def validate_config(cfg: ProjectConfig) -> None:
         )
     if data.resize_mode not in {"letterbox", "stretch"}:
         raise ConfigError("data.resize_mode must be letterbox|stretch")
-    if data.pair_filter not in {"none", "classes", "classes_color"}:
-        raise ConfigError("data.pair_filter must be none|classes|classes_color")
+    if data.pair_filter not in {"none", "classes", "classes_color", "same_seq"}:
+        raise ConfigError("data.pair_filter must be none|classes|classes_color|same_seq")
+    if data.pair_color_metric not in {"max", "weighted"}:
+        raise ConfigError("data.pair_color_metric must be max|weighted")
     if data.image_check not in {"none", "header", "full"}:
         raise ConfigError("data.image_check must be none|header|full")
     ratios = data.split_ratios

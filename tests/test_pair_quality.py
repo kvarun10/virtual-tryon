@@ -75,3 +75,23 @@ def test_filter_without_table_explains(tmp_path):
     with pytest.raises(FileNotFoundError, match="analyze_pairs"):
         PairFilter("classes", tmp_path / "missing.csv")
     assert PairFilter("none").ok("a", "b")
+
+
+def test_breakdown_weighted_metric_and_same_seq_filter(tmp_path):
+    from src.data.pair_quality import breakdown, read_pair_table
+
+    a = {4: (0.8, np.array([50.0, 0, 0])), 9: (0.05, np.array([20.0, 0, 0]))}  # big top, small shoes
+    b = {4: (0.8, np.array([51.0, 0, 0])), 9: (0.05, np.array([80.0, 0, 0]))}  # only the shoes differ
+    m = compare_signatures(a, b)
+    assert m["max_delta_e"] == pytest.approx(60.0) and m["weighted_delta_e"] < 5  # shoes no longer dominate
+    pf = PairFilter("same_seq")
+    assert pf.ok("MEN-Denim-id_00000080-01_1_front", "MEN-Denim-id_00000080-01_7_additional")
+    assert not pf.ok("MEN-Denim-id_00000080-01_1_front", "MEN-Denim-id_00000080-02_1_front")
+    # old-format table (no seq / weighted columns) still loads; same_seq is derived from the names
+    old = tmp_path / "old.csv"
+    old.write_text("item_id,a,b,class_jaccard,same_classes,max_delta_e,mean_delta_e,n_shared\n"
+                   "00000080,MEN-Denim-id_00000080-01_1_front,MEN-Denim-id_00000080-02_1_front,1,1,40,30,2\n"
+                   "00000080,MEN-Denim-id_00000080-01_1_front,MEN-Denim-id_00000080-01_2_side,1,1,3,2,2\n")
+    rows = read_pair_table(old)
+    bd = breakdown(rows)
+    assert bd["1.0"]["pairs"] == 1 and bd["0.0"]["pairs"] == 1 and bd["0.0"]["max_delta_e"]["0.5"] == 40

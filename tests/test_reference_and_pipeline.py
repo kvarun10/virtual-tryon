@@ -60,7 +60,7 @@ def test_person_worn_and_pipeline_stop(smoke_cfg, tmp_path):
     assert present <= {"background", *smoke_cfg.labels.transfer_classes}  # face/hair removed from C_seg
     assert res.target.body_map.max() < 15
     assert (tmp_path / "out" / "C_seg_labels.png").is_file() and (tmp_path / "out" / "pretreatment.json").is_file()
-    with pytest.raises(StageNotAvailableError, match="Phase 4"):
+    with pytest.raises(StageNotAvailableError, match="load_tryon_models"):  # no trained models passed
         try_on(ref_img, tgt_img, smoke_cfg, reference_key=a.name, target_key=b.name, pretreatment=pre)
     with pytest.raises(StageNotAvailableError, match="experimental"):
         try_on(_product_photo(), tgt_img, smoke_cfg, target_key=b.name, reference_mode="garment_only",
