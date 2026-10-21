@@ -34,6 +34,7 @@ from src.config import ProjectConfig
 from src.data.body_maps import BodyMapSource
 from src.data.dataset import PreparedData
 from src.data.labels import convert_labels, get_label_set, keep_classes
+from src.data.pair_quality import PairFilter
 from src.data.preprocessing import load_label_map, resize_labels
 from src.data.transforms import AffineParams, _apply, sample_affine
 from PIL import Image
@@ -119,7 +120,9 @@ class WarpTripletDataset(Dataset):
         for i, r in enumerate(self.records):
             if r.item_id:
                 by_item[r.item_id].append(i)
-        self.siblings = {i: [j for j in by_item[r.item_id] if j != i] if r.item_id else [] for i, r in enumerate(self.records)}
+        pf = PairFilter(cfg.data.pair_filter, cfg.data.pair_table, cfg.data.pair_max_delta_e)
+        self.siblings = {i: [j for j in by_item[r.item_id] if j != i and pf.ok(r.name, self.records[j].name)] if r.item_id else []
+                         for i, r in enumerate(self.records)}
         self.epoch = 0
         self.seed = cfg.experiment.seed
         self.body_aug_px = max(0, round(self.t.warp_body_aug_max_px * self.size[0] / 128)) if self.t.warp_body_aug else 0

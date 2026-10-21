@@ -10,3 +10,8 @@ peak GPU memory 8b overfit check (batch 2),2.01,GB,Colab T4,torch.cuda.max_memor
 SCHP checkpoint size (LIP / Pascal),255.1 / 255.0,MiB,-,file size
 SCHP inference CPU per image incl. model load,6-8,s,local CPU,wall clock
 warp overfit test 250 steps small model 64px,13.3,s,local CPU,wall clock
+texture step time (batch 8 128px AMP nf32 corr32),0.34-0.36,s/step,Colab T4,training log
+texture steps per epoch,1270,steps,batch 8 / 10160 train targets,training log
+texture generator parameters (128px nf32),27.4,million,-,model
+texture discriminator parameters (2 scales),5.6,million,-,model
+VGG-19 ImageNet weights download,548 MB in 7 s,-,Colab,tqdm

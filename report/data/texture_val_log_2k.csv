@@ -1,0 +1,3 @@
+step,val_pairs,ssim,l1_0to1,warped_exemplar_l1_0to1,note
+1000,400,0.8675,0.0453,0.0428,cross-view pairs; whole image incl. white background (no baseline yet)
+2000,400,0.8762,0.0426,0.0427,cross-view pairs; whole image incl. white background (no baseline yet)

@@ -99,6 +99,10 @@ class DataConfig:
     split_file: str = "{cache_dir}/splits/{dataset}_seed{split_seed}.json"
     index_file: str = "{cache_dir}/index/{dataset}_index.json"
     max_samples: Optional[int] = None  # cap per split (smoke tests)
+    # Same-item pair filter (src/data/pair_quality.py); "none" keeps every same-item pair (baseline behaviour)
+    pair_filter: str = "none"  # none | classes | classes_color
+    pair_table: str = "{cache_dir}/pairs/{dataset}_pair_quality.csv"
+    pair_max_delta_e: float = 15.0  # CIE76 colour difference limit for classes_color
     image_check: str = "header"  # none | header | full  (full decodes every image)
     num_workers: int = 2
 
@@ -324,7 +328,7 @@ def _resolve_placeholders(cfg: ProjectConfig) -> None:
     for f in dataclasses.fields(cfg.paths):
         setattr(cfg.paths, f.name, fmt(getattr(cfg.paths, f.name)))
     refresh_names()
-    for attr in ("root", "archive_dir", "split_file", "index_file"):
+    for attr in ("root", "archive_dir", "split_file", "index_file", "pair_table"):
         setattr(cfg.data, attr, fmt(getattr(cfg.data, attr)))
     for attr in ("body_maps_local", "body_maps_archive"):
         setattr(cfg.segmentation, attr, fmt(getattr(cfg.segmentation, attr)))
@@ -348,6 +352,8 @@ def validate_config(cfg: ProjectConfig) -> None:
         )
     if data.resize_mode not in {"letterbox", "stretch"}:
         raise ConfigError("data.resize_mode must be letterbox|stretch")
+    if data.pair_filter not in {"none", "classes", "classes_color"}:
+        raise ConfigError("data.pair_filter must be none|classes|classes_color")
     if data.image_check not in {"none", "header", "full"}:
         raise ConfigError("data.image_check must be none|header|full")
     ratios = data.split_ratios

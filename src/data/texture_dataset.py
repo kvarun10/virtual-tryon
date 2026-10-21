@@ -27,6 +27,7 @@ from torch.utils.data import Dataset
 from src.config import ProjectConfig
 from src.data.dataset import PreparedData
 from src.data.labels import convert_labels, get_label_set
+from src.data.pair_quality import PairFilter
 from src.data.preprocessing import image_to_tensor, load_image, load_label_map, resize_image, resize_labels
 from src.data.transforms import apply_joint_affine, sample_affine
 from src.data.warp_dataset import one_hot_t
@@ -49,7 +50,9 @@ class TextureDataset(Dataset):
         for i, r in enumerate(self.records):
             if r.item_id:
                 by_item[r.item_id].append(i)
-        self.siblings = {i: [j for j in by_item[r.item_id] if j != i] if r.item_id else [] for i, r in enumerate(self.records)}
+        pf = PairFilter(cfg.data.pair_filter, cfg.data.pair_table, cfg.data.pair_max_delta_e)
+        self.siblings = {i: [j for j in by_item[r.item_id] if j != i and pf.ok(r.name, self.records[j].name)] if r.item_id else []
+                         for i, r in enumerate(self.records)}
         self.seed, self.epoch = cfg.experiment.seed, 0
 
     def set_epoch(self, epoch: int) -> None:

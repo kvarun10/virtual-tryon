@@ -17,7 +17,10 @@ Generator objective (weights in ``training.lambda_tex_*``, docs/texture_stage.md
   + domain alignment L1(F_x(layout_t), F_y(image_t))               lambda_tex_domain
   + optional pixel L1                                              lambda_tex_l1
 Discriminator: multi-scale hinge (Eq. 8) on concat(image, layout).
-Validation: L1 and SSIM against the real target photo on cross-view val pairs (best.pt = highest SSIM).
+Validation: SSIM / L1 against the real target photo on cross-view val pairs, over the whole image and over the
+person region (white background inflates whole-image SSIM). Two reference baselines are reported on the same
+pairs: copying the exemplar unchanged, and the upsampled warped exemplar I_S without the SPADE generator.
+best.pt = highest person-region SSIM.
 """
 
 from __future__ import annotations
@@ -46,8 +49,8 @@ from src.utils.paths import ProjectPaths
 
 class TextureTrainer(GANTrainer):
     stage = "texture"
-    score_key = "ssim"
-    metric_version = 1
+    score_key = "ssim_fg"  # SSIM over the person region (white background excluded)
+    metric_version = 2  # v2: best.pt selected by person-region SSIM (v1: whole-image SSIM)
 
     def build(self, vgg: Optional[VGGPerceptualLoss] = None) -> None:
         cfg, t = self.cfg, self.t
@@ -143,25 +146,45 @@ class TextureTrainer(GANTrainer):
     @torch.no_grad()
     def validate(self, max_batches: Optional[int] = None, save_grid: bool = True, kind: str = "val") -> Dict:
         limit = self.t.val_max_batches if max_batches is None else (None if max_batches == 0 else max_batches)
-        l1s, ssims, wl1s, first, n = [], [], [], None, 0
+        acc = {k: [] for k in ("ssim", "ssim_fg", "l1", "l1_fg", "warp_l1", "copy_ssim", "copy_ssim_fg", "copy_l1_fg",
+                               "is_ssim", "is_ssim_fg", "is_l1_fg")}
+        first, n = None, 0
         for i, batch in enumerate(self.val_loader(self.val_ds)):
             if limit is not None and i >= limit:
                 break
             out = self.generate(batch)
-            real = batch["image"].to(self.device)
-            fake01, real01 = (out["fake"] + 1) / 2, (real + 1) / 2
-            l1s += (fake01 - real01).abs().flatten(1).mean(1).tolist()
-            ssims += ssim(fake01.clamp(0, 1), real01).tolist()
+            real01 = (batch["image"].to(self.device) + 1) / 2
+            fg = batch["layout"].to(self.device).argmax(1) != 0  # person region (garment12 background = 0)
+            fgf = fg.unsqueeze(1).float()
+
+            def l1_fg(x):
+                return ((x - real01).abs() * fgf).flatten(1).sum(1) / (3 * fgf.flatten(1).sum(1)).clamp(min=1)
+
+            candidates = {
+                "": ((out["fake"] + 1) / 2).clamp(0, 1),
+                # baseline 1: just copy the exemplar photo (no pose change at all)
+                "copy_": (batch["exemplar"].to(self.device) + 1) / 2,
+                # baseline 2: the alignment network alone (warped exemplar I_S, upsampled), no SPADE generator
+                "is_": F.interpolate((out["warped"] + 1) / 2, size=real01.shape[-2:], mode="bilinear", align_corners=False).clamp(0, 1),
+            }
+            for pre, img in candidates.items():
+                acc[f"{pre}ssim_fg"] += ssim(img, real01, mask=fg).tolist()
+                acc[f"{pre}l1_fg"] += l1_fg(img).tolist()
+                acc[f"{pre}ssim"] += ssim(img, real01).tolist()
+            acc["l1"] += (candidates[""] - real01).abs().flatten(1).mean(1).tolist()
             small = F.adaptive_avg_pool2d(real01, out["warped"].shape[-2:])
-            wl1s += (((out["warped"] + 1) / 2) - small).abs().flatten(1).mean(1).tolist()
-            n += real.shape[0]
+            acc["warp_l1"] += (((out["warped"] + 1) / 2) - small).abs().flatten(1).mean(1).tolist()
+            n += real01.shape[0]
             if first is None:
                 first = (batch, out)
-        metrics = {"kind": kind, "step": self.step, "n_images": n, "metric_version": self.metric_version,
-                   "ssim": float(np.mean(ssims)), "l1": float(np.mean(l1s)), "warp_l1": float(np.mean(wl1s))}
+        metrics = {"kind": kind, "step": self.step, "n_images": n, "metric_version": self.metric_version}
+        metrics.update({k: float(np.mean(v)) for k, v in acc.items() if v})
         self.log.log(metrics)
-        self._print(f"[{kind}] step {self.step} ({n} cross-view pairs): SSIM {metrics['ssim']:.4f} L1 {metrics['l1']:.4f} "
-                    f"| warped-exemplar L1 {metrics['warp_l1']:.4f}")
+        self._print(
+            f"[{kind}] step {self.step} ({n} cross-view pairs): SSIM {metrics['ssim']:.4f} | person-region SSIM "
+            f"{metrics['ssim_fg']:.4f} L1 {metrics['l1_fg']:.4f}\n"
+            f"      baselines (person region): copy exemplar SSIM {metrics['copy_ssim_fg']:.4f} L1 {metrics['copy_l1_fg']:.4f} "
+            f"| warped I_S only SSIM {metrics['is_ssim_fg']:.4f} L1 {metrics['is_l1_fg']:.4f}")
         if save_grid and first is not None:
             swap = None
             if len(self.swap_ds):
@@ -204,7 +227,8 @@ def main():
     if args.evaluate:
         for which in args.evaluate:
             m = trainer.evaluate_checkpoint(which)
-            print(json.dumps({k: m[k] for k in ("checkpoint", "step", "n_images", "ssim", "l1", "warp_l1")}, indent=1))
+            print(json.dumps({k: m[k] for k in ("checkpoint", "step", "n_images", "ssim", "ssim_fg", "l1_fg",
+                                                "copy_ssim_fg", "is_ssim_fg")}, indent=1))
         return
     print(json.dumps(trainer.fit(max_steps=args.max_steps, resume=not args.no_resume), indent=1))
 

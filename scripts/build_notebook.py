@@ -52,6 +52,7 @@ EXTRA_OVERRIDES = []                # e.g. ["data.image_size=[256,256]", "data.m
 FETCH_DFMM = False                  # extract the archives from Drive to Colab's local disk (needed every session)
 DFMM_ALLOW_DOWNLOAD = False         # first session only: download missing archives into Drive (~5.5 GB)
 DFMM_PARTS = "images_parsing"       # images + parsing + keypoints; "all" adds DensePose (~5.6 GB more)
+ANALYZE_PAIRS = False               # measure outfit consistency of same-item photo pairs (Section 6b, ~minutes)
 
 # --- Phase 4: warp network ---------------------------------------------------------------
 PRECOMPUTE_BODY_MAPS = False        # once: SCHP-Pascal over all 12,701 annotated images (GPU), archived to Drive
@@ -269,6 +270,22 @@ plt.show()
 """)
 
 md(r"""
+## 6b. Pair consistency (same item ID is not always the same outfit)
+In DeepFashion an item ID names one product. The rest of the outfit can change between photos (e.g. the item is a beanie), and such cross-view pairs teach the networks impossible mappings. This cell measures, for every same-item pair, whether the garment classes match and how different the garment colours are (CIE76 ΔE). Results go to the pair table used by `data.pair_filter` (off by default) and to `outputs/<experiment>/pair_quality/`.
+""")
+code(r"""
+if ANALYZE_PAIRS and not DRY_RUN:
+    import importlib.util, json
+    spec = importlib.util.spec_from_file_location("analyze_pairs", "scripts/analyze_pairs.py")
+    ap_mod = importlib.util.module_from_spec(spec); sys.path.insert(0, "scripts"); spec.loader.exec_module(ap_mod)
+    table, pq_dir, pq_summary = ap_mod.run(cfg)
+    print(json.dumps(pq_summary, indent=1))
+    display(Image.open(pq_dir / "pair_delta_e_hist.png")) if "Image" in globals() else None
+else:
+    print("Skipped (ANALYZE_PAIRS=False or DRY_RUN).")
+""")
+
+md(r"""
 ## 7. Pre-treatment inference (Stage A)
 This runs the configured clothing and body backends on two images from the validation split: one is used as the reference and one as the target.
 
@@ -478,7 +495,7 @@ Set `RUN_TEXTURE_TRAINING=True` (and `ALLOW_VGG_DOWNLOAD=True` the first time). 
 What to watch:
 * `vgg` (perceptual), `warp` (warped exemplar vs real photo) and `domain` should fall.
 * `d` should stay roughly between 0.5 and 2 (hinge loss); `d` near 0 means the discriminator is winning.
-* Validation **SSIM** (generated vs real target photo, same garment, new pose) should rise; L1 should fall.
+* Validation **person-region SSIM** (generated vs real target photo, white background excluded) should rise and stay above the two baselines printed next to it: copying the exemplar unchanged, and the warped exemplar I_S alone. Whole-image SSIM is inflated by the white background.
 * Grid columns: exemplar | target layout | warped exemplar I_S | generated | real photo. The lower rows are a swap with no ground truth.
 """)
 code(r"""
@@ -488,7 +505,9 @@ else:
     print("Skipped (RUN_TEXTURE_TRAINING=False).")
 for which in EVAL_TEXTURE_CHECKPOINTS:
     m = tex.evaluate_checkpoint(which)
-    print(f"{which:5s} step {m['step']}: SSIM {m['ssim']:.4f} | L1 {m['l1']:.4f} | warped L1 {m['warp_l1']:.4f} on {m['n_images']} pairs")
+    print(f"{which:5s} step {m['step']} on {m['n_images']} pairs: SSIM {m['ssim']:.4f} | person-region SSIM {m['ssim_fg']:.4f} "
+          f"L1 {m['l1_fg']:.4f} | baselines (person region): copy exemplar SSIM {m['copy_ssim_fg']:.4f}, "
+          f"warped I_S only SSIM {m['is_ssim_fg']:.4f}")
 """)
 code(r"""
 from PIL import Image
