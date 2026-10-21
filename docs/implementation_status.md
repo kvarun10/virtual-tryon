@@ -214,3 +214,13 @@ Pair analysis: 16,029 same-item pairs, 72.8% identical garment classes, median m
   warp mIoU on these pairs 0.655. Warp errors cost ~0.13 SSIM; the texture stage itself is still short-trained.
 * Visual: garments move onto new poses and the target's face is kept (grids in `report/private/colab/e2e_sessionA_*`).
   Detail is limited at 128 px; jumpsuits and dresses keep their colour; the texture stage blurs patterns.
+
+## Colab session B (2026-10-21): texture with the pair filter
+
+* `texture_pf`: 13,000 steps in 76.8 min (0.32–0.35 s/step). Training validation used the mixed metric v2
+  (real + pseudo pairs; see problems_log P26) and is not comparable across runs.
+* **Clean result** on the 260 real cross-view val pairs (texture given the ground-truth layout): 0.576 SSIM / 0.0926 L1
+  (baseline 2k-step texture: 0.566 / 0.0996).
+* **End-to-end** (warp_pf + texture_pf, same 260 pairs, garment + skin region): SSIM 0.442 (pasted 0.447), L1 0.126;
+  copy-exemplar 0.195. Warp errors cost ~0.13 SSIM.
+* Fixed afterwards: texture validation counts real cross-view pairs only (metric v3).

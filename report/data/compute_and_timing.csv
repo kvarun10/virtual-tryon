@@ -15,3 +15,5 @@ texture steps per epoch,1270,steps,batch 8 / 10160 train targets,training log
 texture generator parameters (128px nf32),27.4,million,-,model
 texture discriminator parameters (2 scales),5.6,million,-,model
 VGG-19 ImageNet weights download,548 MB in 7 s,-,Colab,tqdm
+texture_pf 13000 steps (filtered pairs),76.8,minutes,Colab T4,training log (0.32-0.35 s/step)
+end-to-end evaluation 260 pairs,42.5,seconds,Colab T4,Section 11

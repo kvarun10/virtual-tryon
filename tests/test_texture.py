@@ -240,4 +240,15 @@ def test_validation_reports_baselines(tmp_path):
     m = t.validate(max_batches=1, save_grid=False)
     for k in ("ssim", "ssim_fg", "l1_fg", "copy_ssim_fg", "copy_l1_fg", "is_ssim_fg", "is_l1_fg"):
         assert k in m and np.isfinite(m[k])
-    assert t.score_key == "ssim_fg" and t.metric_version == 2
+    assert t.score_key == "ssim_fg" and t.metric_version == 3
+
+
+def test_validation_uses_only_real_cross_view_pairs(tmp_path):
+    """Regression (Colab session B, 2026-10-21): photos without a partner were scored as easy pseudo pairs."""
+    t = TextureTrainer(cfg_for(tmp_path), verbose=False)
+    real = [i for i in range(len(t.val_ds)) if t.val_ds.siblings[i]]
+    assert len(t.val_eval_ds) == len(real) > 0
+    for k in range(len(t.val_eval_ds)):
+        assert t.val_eval_ds[k]["mode"] == "cross_view"
+    m = t.validate(max_batches=0, save_grid=False)
+    assert m["n_images"] == len(real) and m["pair_type"] == "cross-view pairs" and t.metric_version == 3

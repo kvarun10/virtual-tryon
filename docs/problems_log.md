@@ -36,6 +36,8 @@ Evidence paths refer to `report/` (numbers, charts), `docs/`, and `tests/`. Date
 | P23 | 10-21 | Stage C | Generated faces belong to the exemplar person | by design (Phase 6) |
 | P24 | 10-21 | Tooling | CPU dry run would have needed a 548 MB VGG download | fixed |
 | P25 | 10-21 | Data | 165 images are 750×915, one is 2574×3861; full annotation check not run | open (check) |
+| P26 | 10-21 | Metrics | Texture validation silently mixed easy "pseudo" pairs with real pose-change pairs | fixed (metric v3) |
+| P27 | 10-21 | Stage C | 6.5× more texture training gave only +0.01 SSIM on real pose-change pairs | open (analysis) |
 
 ---
 
@@ -210,6 +212,27 @@ Evidence paths refer to `report/` (numbers, charts), `docs/`, and `tests/`. Date
 * **Plan:** run `scripts/prepare_dataset.py --annotation-sample 0` once in Colab.
 * **Status:** open (check).
 
+### P26 – Texture validation mixed pair types (Phase 5, session B)
+* **Symptom:** session B printed "1271 cross-view pairs" and person-region SSIM rising to 0.677, while Section 11 found
+  only 260 real cross-view validation pairs after the pair filter.
+* **Cause:** validation iterated over every validation photo; a photo without a (filtered) same-outfit partner was
+  scored as a pseudo pair (its own rotated/flipped copy as exemplar), which is a much easier task than a pose change.
+  The filter shifted the mix from mostly real to mostly pseudo pairs, so v2 numbers across runs are not comparable.
+* **Clean comparison (same 260 real pairs, texture given the ground-truth layout):** baseline texture (2k steps)
+  0.566 SSIM / 0.0996 L1 vs `texture_pf` (13k steps, filtered) **0.576 / 0.0926**
+  (`report/data/texture_clean_comparison_260pairs.csv`).
+* **Action:** texture validation now uses real cross-view pairs only and labels the pair type (metric v3, best.pt
+  counters reset); regression test.
+* **Status:** fixed.
+
+### P27 – Texture gains little from longer training on real pose changes (Phase 5, session B)
+* **Evidence:** +0.010 SSIM / −7% L1 for 6.5× the steps on the 260 real pairs; end-to-end only 0.437 → 0.442.
+  The discriminator stayed near "cannot tell" (hinge d ≈ 1.7–1.9 for all 13k steps; P22).
+* **Likely causes (to test one at a time):** (a) with the filter, only 2,514 of 10,160 training targets have a real
+  partner, so most texture training is on easy pseudo pairs; (b) the weak adversarial signal leaves outputs blurry;
+  (c) 128 px resolution.
+* **Status:** open. Warp errors still cost more (end-to-end 0.442 vs 0.576 with the ground-truth layout).
+
 ---
 
 ## Lessons used throughout
@@ -217,4 +240,5 @@ Evidence paths refer to `report/` (numbers, charts), `docs/`, and `tests/`. Date
 * Verify on the real environment early: three bugs (P07, P14, P16) only appeared outside the local CPU tests.
 * Put a baseline next to every metric (P15, P20) and compute derived numbers in code (P17).
 * Check what a dataset's identifiers really mean before using them for supervision (P21).
+* When a data filter changes, re-check what the validation set now contains (P26).
 * Keep every fix behind a regression test, so it cannot silently come back.
