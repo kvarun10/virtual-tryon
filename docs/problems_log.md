@@ -157,14 +157,23 @@ Evidence paths refer to `report/` (numbers, charts), `docs/`, and `tests/`. Date
 * **Cause:** DeepFashion photos are mostly white background; matching blank areas scores high SSIM for free.
 * **Evidence:** on the fixture, copying the exemplar unchanged scores 0.69 on the whole image but 0.43 on the person region; unit test `tests/test_texture.py::test_masked_ssim_ignores_background`.
 * **Action:** validation now reports person-region SSIM/L1 plus two baselines on the same pairs (copy the exemplar unchanged; the warped exemplar I_S alone). `best.pt` is selected by person-region SSIM (metric v2).
-* **Status:** fixed in code; the real numbers need the next Colab evaluation.
+* **Result (full val, 1,271 pairs, step 2,000):** whole image 0.883 vs **person region 0.540**. Baselines on the
+  person region: copy exemplar 0.125, warped I_S alone 0.384. The generator adds +0.16 SSIM over I_S; L1 is
+  barely better (0.157 vs 0.164), so it mainly improves structure, not colour, so far
+  (`report/data/texture_eval_step2000_fullval.csv`).
+* **Status:** fixed (measured).
 
 ### P21 – Same item ID ≠ same outfit (Phase 5)
 * **Symptom:** a validation pair showed a plaid shirt + jeans as the exemplar and a green sweater + black jeans as the "same item" target (`report/private/colab/texture_step2000_val_grid_part1.png`, rows 2–3).
 * **Cause:** a DeepFashion item ID names one product (here probably the beanie or bag); the rest of the outfit can change between photos.
 * **Impact:** such pairs ask both networks to produce garments that are not in their input (noise in cross-view supervision for warp and texture).
 * **Action:** pair-consistency analysis (identical garment classes + CIELAB colour difference per garment) for all same-item pairs; optional `data.pair_filter` (off by default so baselines stay comparable); tested on a fixture with deliberately changed outfits.
-* **Status:** mitigated in code; the share of bad pairs in DFMM and the threshold choice need the Colab analysis (notebook Section 6b).
+* **Measurement (16,029 pairs, 2,701 items):** 72.8% have identical garment classes; median max ΔE 49;
+  only 15.8% pass "same classes and ΔE ≤ 15" (`report/data/pair_quality_summary_dfmm.json`). That is
+  more inconsistency than outfit changes alone explain. Hypotheses under test: (a) the photo-set number in the
+  file name (`-01_`, `-02_`) marks different shoots or colourways; (b) the max-over-garments ΔE is dominated
+  by small regions such as shoes.
+* **Status:** mitigated in code; filter rule pending the breakdown analysis.
 
 ### P22 – Weak texture discriminator (Phase 5)
 * **Evidence:** hinge `d` stayed at 1.7–2.1 over 2,000 steps (2.0 = cannot tell real from fake); `g_adv` 0–0.7 (`report/data/texture_train_log_2k.csv`).

@@ -83,6 +83,14 @@ and rerun `make_charts.py`.
 | Generator can learn | `data/texture_overfit_one_batch_cpu.csv`, `figures/texture_overfit_one_batch.png` | SSIM 0.62 → 0.994 in 300 steps |
 | Model size / memory | `docs/implementation_status.md` (Phase 5) | 27.4 M (128 px), 97.2 M (256 px); M = 4 MiB / 64 MiB per sample |
 
+### D-H. Texture evaluation needs baselines; same-item pairs are noisy
+| Evidence | File | Key numbers |
+|---|---|---|
+| Whole-image SSIM is inflated by background | `data/texture_eval_step2000_fullval.csv` | whole 0.883 vs person region 0.540 |
+| The generator adds value over simpler methods | same | person-region SSIM: copy 0.125, warped I_S 0.384, full texture stage 0.540 |
+| Same item ID ≠ same outfit | `data/pair_quality_summary_dfmm.json` | 16,029 pairs: 72.8% same garment classes; median max ΔE 49; 15.8% pass classes + ΔE ≤ 15 |
+| Visual evidence (rows 2–3: different outfits under one item ID) | `private/colab/texture_step2000_val_grid_part1.png` | — |
+
 ---
 
 ## 2. Thresholds and settings used (and why)

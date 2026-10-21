@@ -50,7 +50,7 @@ class TextureDataset(Dataset):
         for i, r in enumerate(self.records):
             if r.item_id:
                 by_item[r.item_id].append(i)
-        pf = PairFilter(cfg.data.pair_filter, cfg.data.pair_table, cfg.data.pair_max_delta_e)
+        pf = PairFilter(cfg.data.pair_filter, cfg.data.pair_table, cfg.data.pair_max_delta_e, cfg.data.pair_color_metric)
         self.siblings = {i: [j for j in by_item[r.item_id] if j != i and pf.ok(r.name, self.records[j].name)] if r.item_id else []
                          for i, r in enumerate(self.records)}
         self.seed, self.epoch = cfg.experiment.seed, 0

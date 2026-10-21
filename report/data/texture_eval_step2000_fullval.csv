@@ -1,0 +1,4 @@
+method,val_pairs,ssim_whole_image,ssim_person_region,l1_person_region,commit,note
+copy exemplar unchanged (baseline),1271,,0.1250,0.2889,a590a0d,no pose change at all
+warped exemplar I_S only (alignment network baseline),1271,,0.3838,0.1644,a590a0d,32x32 upsampled bilinear
+texture stage alignment+SPADE (step 2000),1271,0.8828,0.5403,0.1573,a590a0d,whole-image SSIM inflated by white background

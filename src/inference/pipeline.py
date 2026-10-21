@@ -42,6 +42,7 @@ class TryOnResult:
     output: Optional[np.ndarray] = None  # I_G (Phase 5)
     completed_stages: tuple = ()
     notes: list = field(default_factory=list)
+    extra: Dict = field(default_factory=dict)  # all intermediate maps of a full try-on (model resolution)
 
 
 class PreTreatment:
@@ -68,9 +69,13 @@ class PreTreatment:
 
 def try_on(reference_image, target_image, config: Optional[ProjectConfig] = None, *, reference_key: Optional[str] = None,
            target_key: Optional[str] = None, reference_mode: Optional[str] = None, garment_category: Optional[str] = None,
-           stop_after: str = "texture", pretreatment: Optional[PreTreatment] = None,
+           stop_after: str = "texture", pretreatment: Optional[PreTreatment] = None, models=None,
            save_dir: Optional[Path] = None) -> TryOnResult:
-    """Run the Dress-up pipeline. ``stop_after``: pretreatment | warp | texture."""
+    """Run the Dress-up pipeline. ``stop_after``: pretreatment | warp | texture.
+
+    ``models``: a :class:`src.inference.tryon.TryOnModels` (``load_tryon_models(cfg)``) with trained warp and
+    texture weights. Without it only Stage A can run. All model outputs are at ``data.image_size``.
+    """
     if stop_after not in {"pretreatment", "warp", "texture"}:
         raise ValueError("stop_after must be pretreatment | warp | texture")
     cfg = config or load_config()
@@ -87,10 +92,46 @@ def try_on(reference_image, target_image, config: Optional[ProjectConfig] = None
             f"Reference mode '{ref.mode}' is experimental and has no compatible warp model. "
             "Use stop_after='pretreatment' to inspect its C_seg."
         )
-    raise StageNotAvailableError(
-        "Stage B (warp network) is not implemented yet (planned for Phase 4) and no trained weights exist. "
-        "Call try_on(..., stop_after='pretreatment') to obtain C_seg and B_seg."
-    )
+    if models is None:
+        raise StageNotAvailableError(
+            "No trained models were given. Load them with src.inference.tryon.load_tryon_models(cfg) and pass "
+            "models=..., or call try_on(..., stop_after='pretreatment') for C_seg and B_seg only."
+        )
+    from src.inference.tryon import to_model_size, tryon_core
+
+    ref_img, ref_parse, _ = to_model_size(cfg, ref.image, ref.full_parsing)
+    tgt_img, tgt_body, tgt_parse, info = to_model_size(cfg, tgt.image, tgt.body_map, tgt.parsing)
+    core = tryon_core(models, ref_img, ref_parse, tgt_img, tgt_body, tgt_parse)
+    result.warped_garment = core["c_warp"]
+    result.correspondence = core["warped_exemplar"]
+    result.output = core["result"]
+    result.completed_stages = ("pretreatment", "warp", "texture")
+    result.notes.append(f"outputs at model resolution {tuple(cfg.data.image_size)}; target face/hair pixels pasted (D23)")
+    result.extra = {**core, "reference_model_size": ref_img, "target_model_size": tgt_img, "target_body": tgt_body,
+                    "resize_info": info}
+    if save_dir is not None:
+        save_tryon(result, Path(save_dir), cfg)
+    return result
+
+
+def save_tryon(result: TryOnResult, out_dir: Path, cfg: ProjectConfig) -> Path:
+    """Save every stage of a full try-on as PNGs plus a one-row overview."""
+    from PIL import Image
+
+    from src.data.labels import colorize
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    G = get_label_set(cfg.labels.garment_label_set)
+    B = get_label_set(cfg.labels.body_label_set)
+    e = result.extra
+    tiles = [e["reference_model_size"], colorize(e["c_seg"], G), e["target_model_size"], colorize(e["target_body"], B),
+             colorize(e["c_warp"], G), colorize(e["layout"], G), e["warped_exemplar"], e["raw"], e["result"]]
+    names = ["reference", "C_seg", "target", "B_seg", "C_seg_warped", "layout_with_identity", "warped_exemplar_I_S",
+             "generated_raw", "result"]
+    for n, t in zip(names, tiles):
+        Image.fromarray(t).save(out_dir / f"{n}.png")
+    Image.fromarray(np.concatenate(tiles, 1)).save(out_dir / "overview.png")
+    return out_dir
 
 
 def save_pretreatment(result: TryOnResult, out_dir: Path, cfg: ProjectConfig) -> Path:

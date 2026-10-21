@@ -19,7 +19,7 @@ import numpy as np  # noqa: E402
 
 from src.config import load_config  # noqa: E402
 from src.data.dataset import prepare_dataset  # noqa: E402
-from src.data.pair_quality import build_pair_table, summarise, write_pair_table  # noqa: E402
+from src.data.pair_quality import breakdown, build_pair_table, read_pair_table, summarise, write_pair_table  # noqa: E402
 from src.utils.paths import ProjectPaths  # noqa: E402
 
 
@@ -33,6 +33,7 @@ def run(cfg, progress=True):
     out = ProjectPaths.from_config(cfg).experiment_dir("outputs", cfg.experiment.name) / "pair_quality"
     out.mkdir(parents=True, exist_ok=True)
     summary = summarise(rows)
+    summary["by_photo_set"] = breakdown(rows, "same_seq")  # "1.0" = same -NN_ photo set
     (out / "pair_quality_summary.json").write_text(json.dumps(summary, indent=1), encoding="utf-8")
     de = np.array([r["max_delta_e"] for r in rows if not np.isnan(r["max_delta_e"])])
     fig, ax = plt.subplots(figsize=(6, 3))
@@ -47,9 +48,14 @@ def run(cfg, progress=True):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--config", required=True)
+    ap.add_argument("--config", default=None)
     ap.add_argument("--override", nargs="*", default=[])
+    ap.add_argument("--table", default=None, help="only summarise an existing pair table (no image reading)")
     args = ap.parse_args()
+    if args.table:
+        rows = read_pair_table(Path(args.table))
+        print(json.dumps({**summarise(rows), "by_photo_set": breakdown(rows, "same_seq")}, indent=1))
+        return
     table, out, summary = run(load_config(args.config, args.override))
     print(json.dumps(summary, indent=1))
     print("pair table:", table, "| summary + histogram:", out)

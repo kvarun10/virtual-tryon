@@ -353,3 +353,19 @@ def test_resume_resets_best_from_old_metric(tmp_path):
     torch.save(st, a.ckpt.last)
     b = WarpTrainer(cfg_for(tmp_path), verbose=False)
     assert b.resume() and b.best == -float("inf")
+
+
+def test_time_budget_stops_cleanly_and_resume_continues(tmp_path):
+    t = WarpTrainer(cfg_for(tmp_path, "training.val_every=1000", "training.checkpoint_every=1000"), verbose=False)
+    out = t.fit(max_steps=50, resume=False, time_limit_min=0.0)  # budget already used up after the first step
+    assert out["stopped_by"] == "time_limit" and out["step"] == 1
+    assert t.ckpt.last.is_file()
+    t2 = WarpTrainer(cfg_for(tmp_path, "training.val_every=1000", "training.checkpoint_every=1000"), verbose=False)
+    assert t2.fit(max_steps=3)["step"] == 3  # resumes from step 1
+
+
+def test_run_name_separates_checkpoint_folders(tmp_path):
+    a = WarpTrainer(cfg_for(tmp_path), verbose=False)
+    b = WarpTrainer(cfg_for(tmp_path, "training.warp_run_name=warp_pairfilter"), verbose=False)
+    assert a.ckpt.dir.name == "warp" and b.ckpt.dir.name == "warp_pairfilter"
+    assert a.ckpt.dir.parent == b.ckpt.dir.parent

@@ -27,6 +27,7 @@ Sources: [P] = paper, [R:x] = reference x, [E] = our engineering decision.
 | D19 | SPADE translation (Eq. 7) conditioned on I_S, constant code z | learned constant input; SPADE γ/β from I_S **+ layout**; positional normalisation; spectral norm | adapted | layout gives sharp garment boundaries the 32×32 I_S cannot |
 | D20 | Texture losses: hinge GAN only (Eqs. 8–9) | hinge GAN (2-scale PatchGAN) + D feature matching + VGG-19 perceptual + warp L1 + cycle regularisation + domain alignment; **no contextual loss** | adapted | adversarial-only does not train at this scale; paired ground truth makes the contextual loss less necessary |
 | D21 | Texture optimiser: Adam (0, 0.999), lr_G 1e-4, "imbalanced" lr_D | same, lr_D = 4e-4 | faithful + CoCosNet TTUR | |
+| D23 | Identity: replace face/hair *labels* with the target's (Sec. 4.2) | same, **plus** the target's face/hair *pixels* pasted into the result with a feathered (Gaussian σ=1 px) mask | adapted | the texture network is trained on same-person pairs and reproduces the exemplar's face |
 | D22 | Texture training data (not described) | ground-truth layouts; exemplar = another photo of the same item (80%) or a distorted copy of the target (20%, CoCosNet pseudo pairs) | adapted | warp outputs are only used at try-on time (Phase 6) |
 
 No SyncBN anywhere (single GPU). Full texture-stage design: `texture_stage.md`.

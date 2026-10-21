@@ -182,3 +182,23 @@ Real-data texture run: 0.34–0.36 s/step on T4; val SSIM 0.868 (step 1,000) →
 * validation now reports person-region SSIM/L1 and two baselines (copy exemplar; warped I_S only); `best.pt`
   is selected by person-region SSIM (texture metric v2). Real numbers need a Colab re-evaluation;
 * pair-consistency analysis + optional `data.pair_filter` (off by default). The DFMM statistics need the Colab run (Section 6b).
+
+## Phase 6: end-to-end try-on (2026-10-21)
+
+Implemented: `src/inference/tryon.py` (load trained generators with architecture check; Stage A, then warp, then the
+paper's Sec. 4.2 face/hair labels, then texture, then face/hair pixel paste), `try_on(..., models=...)` with
+saved per-stage PNGs, `src/evaluation/end_to_end.py` (paired evaluation on garment + skin pixels with the
+ground-truth-layout upper bound and the copy-exemplar lower bound, warp mIoU on the same pairs, swap grid),
+notebook Section 11, time-budgeted training (`fit(time_limit_min=...)`), named runs (`training.*_run_name`),
+one-folder export of session results (Section 14), and a CPU-runtime option (`REQUIRE_GPU=False`).
+
+Verified locally (CPU, fixture, tiny models trained for 2 steps): models load in eval mode, the full `try_on`
+writes all stage outputs, untrained classes never appear in C'_seg, the target's face pixels are copied exactly
+into the result, missing/mismatched checkpoints give clear errors, end-to-end metrics are finite, and the
+notebook runs all 28 code cells with training and Phase 6 switched on.
+
+Not verified: any end-to-end result on real data (needs the next Colab session).
+
+Real-data texture evaluation (step 2,000, full val, 1,271 pairs, commit a590a0d): person-region SSIM 0.540 vs
+baselines 0.384 (warped I_S only) and 0.125 (copy exemplar); whole-image SSIM 0.883.
+Pair analysis: 16,029 same-item pairs, 72.8% identical garment classes, median max ΔE 49 (problems_log P21).

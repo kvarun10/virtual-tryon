@@ -9,7 +9,7 @@ allow, the three-stage virtual try-on pipeline from
 No official Dress-up code or weights exist. Every component is either re-implemented, replaced by
 a documented pretrained substitute, or not yet implemented. See `docs/implementation_deviations.md`.
 
-## Current status: warp trained (baseline); texture code complete, not trained yet
+## Current status: warp trained (baseline); texture trained briefly (2k steps); end-to-end try-on implemented
 
 | Stage | What it does | Status |
 |---|---|---|

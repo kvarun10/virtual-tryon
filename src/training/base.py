@@ -51,10 +51,11 @@ class GANTrainer:
         self.use_amp = bool(self.t.amp and self.device.type == "cuda")
         self.scaler = torch.amp.GradScaler("cuda", enabled=self.use_amp)
         paths = ProjectPaths.from_config(cfg)
-        self.ckpt = CheckpointManager(paths.checkpoints / cfg.experiment.name / self.stage)
-        self.out_dir = paths.outputs / cfg.experiment.name / self.stage
+        self.run_name = getattr(self.t, f"{self.stage}_run_name", self.stage)  # e.g. warp, warp_pairfilter
+        self.ckpt = CheckpointManager(paths.checkpoints / cfg.experiment.name / self.run_name)
+        self.out_dir = paths.outputs / cfg.experiment.name / self.run_name
         self.out_dir.mkdir(parents=True, exist_ok=True)
-        self.log = JsonlLogger(paths.logs / cfg.experiment.name / f"{self.stage}_train.jsonl")
+        self.log = JsonlLogger(paths.logs / cfg.experiment.name / f"{self.run_name}_train.jsonl")
         self.step = self.epoch = self.batch_in_epoch = 0
         self.best = -math.inf
         self.bad_evals = 0
@@ -152,9 +153,13 @@ class GANTrainer:
                           num_workers=self.cfg.data.num_workers, collate_fn=self.collate)
 
     # ------------------------------------------------------------------ training loop
-    def fit(self, max_steps: Optional[int] = None, resume: bool = True) -> Dict:
+    def fit(self, max_steps: Optional[int] = None, resume: bool = True, time_limit_min: Optional[float] = None) -> Dict:
+        """Train until ``max_steps`` (or epochs). ``time_limit_min``: stop cleanly (validate + save) once this
+        much wall-clock time has passed, so a Colab session keeps time for evaluation; re-run to continue."""
         if resume:
             self.resume()
+        t_start = time.time()
+        stopped_by = "max_steps"
         max_steps = max_steps or self.t.max_steps
         per_epoch = len(self.train_ds) // self.t.batch_size // self.t.grad_accum_steps
         if per_epoch == 0:
@@ -198,16 +203,25 @@ class GANTrainer:
                 patience = self.t.early_stop_patience
                 if patience and self.bad_evals >= patience:
                     self._print(f"early stop: no val {self.score_key} improvement in {self.bad_evals} evaluations")
+                    stopped_by = "early_stop"
                     stop = True
                     break
                 if self.step >= total:
+                    stop = True
+                    break
+                if time_limit_min is not None and (time.time() - t_start) / 60 >= time_limit_min:
+                    self._print(f"time budget of {time_limit_min:.0f} min reached at step {self.step}; "
+                                "validating and saving. Re-run with the same settings to continue.")
+                    self.validate()
+                    stopped_by = "time_limit"
                     stop = True
                     break
             else:
                 self.epoch += 1
                 self.batch_in_epoch = 0
         self.save()
-        return {"step": self.step, f"best_val_{self.score_key}": self.best, "checkpoint": str(self.ckpt.last)}
+        return {"step": self.step, f"best_val_{self.score_key}": self.best, "checkpoint": str(self.ckpt.last),
+                "stopped_by": stopped_by, "minutes": round((time.time() - t_start) / 60, 1)}
 
     def _print(self, msg: str) -> None:
         if self.verbose:
