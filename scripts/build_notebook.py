@@ -24,7 +24,7 @@ Research implementation of **"Dress-up: deep neural framework for image-based hu
 |---|---|
 | A. Pre-treatment (clothing + body segmentation) | implemented: pretrained SCHP substitutes for LIP-JppNet / NBF, DFMM annotations |
 | B. Warp network (dual-path U-Net) | implemented and unit-tested (Phase 4); **not yet trained on real data** |
-| C. Texture network (alignment + SPADE) | **not implemented yet** (Phase 5) |
+| C. Texture network (alignment + SPADE) | implemented and unit-tested (Phase 5); **not yet trained on real data** |
 | Garment-only (product photo) references | experimental preprocessing only; no compatible warp model |
 
 Every section can be read on its own. Run the cells from top to bottom. Nothing heavy runs automatically. Downloads only happen if you allow them in the settings cell.
@@ -58,6 +58,12 @@ PRECOMPUTE_BODY_MAPS = False        # once: SCHP-Pascal over all 12,701 annotate
 RUN_WARP_TRAINING = False           # start/resume warp training (Section 10)
 WARP_MAX_STEPS = 2000               # total optimiser steps; re-running resumes from the last checkpoint
 EVAL_WARP_CHECKPOINTS = []          # e.g. ["best", "last"]: score checkpoints on the WHOLE val split (no training)
+
+# --- Phase 5: texture network ---------------------------------------------------------------
+ALLOW_VGG_DOWNLOAD = False          # once: VGG-19 ImageNet weights (~548 MB) for the perceptual loss, cached in Drive
+RUN_TEXTURE_TRAINING = False        # start/resume texture training (Section 10b)
+TEXTURE_MAX_STEPS = 2000            # total optimiser steps; re-running resumes
+EVAL_TEXTURE_CHECKPOINTS = []       # e.g. ["best", "last"]
 """)
 
 md(r"""
@@ -191,6 +197,8 @@ if IN_COLAB and USE_DRIVE and not DRY_RUN:
     overrides.append(f"paths.drive_root={DRIVE_PROJECT_ROOT}")
 if ALLOW_WEIGHT_DOWNLOAD:
     overrides.append("segmentation.allow_weight_download=true")
+if ALLOW_VGG_DOWNLOAD:
+    overrides.append("training.allow_vgg_download=true")
 cfg = load_config(CONFIG_FILE, overrides)
 paths = ProjectPaths.from_config(cfg).ensure()
 seed_everything(cfg.experiment.seed, cfg.experiment.deterministic)
@@ -371,7 +379,40 @@ del g_tmp, opt
 if torch.cuda.is_available(): print(f"peak GPU memory: {torch.cuda.max_memory_allocated()/2**30:.2f} GB")
 """)
 
-md("## 9. Texture network\n**Not implemented yet. Planned for Phase 5.** Alignment network (Eqs. 5-6, correlation in FP32) and SPADE generator (Eq. 7).")
+md(r"""
+## 9. Texture network (Stage C): model checks
+Alignment network (paper Eqs. 5-6) plus SPADE generator (Eq. 7); see `docs/texture_stage.md`.
+Training input is **ground-truth** layouts (target photo's parsing) and an exemplar photo of the same garment. The warp network is not used here; its output feeds this stage at try-on time (Phase 6).
+The perceptual loss needs VGG-19 ImageNet weights (~548 MB, BSD). Set `ALLOW_VGG_DOWNLOAD=True` once; they are cached in `<drive>/pretrained/torch`.
+""")
+code(r"""
+from src.training.train_texture import TextureTrainer
+from src.models.alignment_network import correlation_bytes
+from src.data.texture_dataset import texture_collate
+tex = TextureTrainer(cfg, prepared)
+print("texture generator:", f"{sum(p.numel() for p in tex.gen.parameters())/1e6:.1f}M params",
+      "| discriminator:", f"{sum(p.numel() for p in tex.disc.parameters())/1e6:.1f}M")
+cs = cfg.model.texture_corr_size
+print(f"correspondence {cs}x{cs}: M is {cs*cs}x{cs*cs}, ~{correlation_bytes(cs, cfg.training.batch_size)/2**20:.0f} MiB per batch (FP32 incl. backward)")
+print(f"train targets: {len(tex.train_ds)} ({tex.train_ds.n_cross_view_available()} with a same-item exemplar) | val pairs: {len(tex.val_ds)}")
+tb = texture_collate([tex.train_ds[i] for i in range(2)])
+print({k: tuple(v.shape) for k, v in tb.items() if hasattr(v, "shape")}, tb["mode"])
+""")
+code(r"""
+# One-batch overfit check (pixel L1 only, throw-away copy). L1 must fall clearly.
+import copy, torch, torch.nn.functional as F
+g_tmp = copy.deepcopy(tex.gen).train(); opt = torch.optim.Adam(g_tmp.parameters(), lr=1e-3, betas=(0.5, 0.999))
+dev = tex.device
+L, I, E, P = (tb[k].to(dev) for k in ("layout", "image", "exemplar", "exemplar_parsing"))
+for s in range(60):
+    loss = F.l1_loss(g_tmp(L, E, P)["fake"], I)
+    assert torch.isfinite(loss)
+    if s in (0, 19, 59): print(f"step {s+1}: L1 {loss.item():.4f}")
+    opt.zero_grad(); loss.backward(); opt.step()
+del g_tmp, opt
+if torch.cuda.is_available(): print(f"peak GPU memory so far: {torch.cuda.max_memory_allocated()/2**30:.2f} GB")
+""")
+
 
 md(r"""
 ## 10. Training: warp stage
@@ -431,6 +472,47 @@ else:
     print("No validation grid yet.")
 """)
 
+md(r"""
+## 10b. Training: texture stage
+Set `RUN_TEXTURE_TRAINING=True` (and `ALLOW_VGG_DOWNLOAD=True` the first time). Checkpoints go to `<drive>/checkpoints/<experiment>/texture/`; re-running resumes exactly.
+What to watch:
+* `vgg` (perceptual), `warp` (warped exemplar vs real photo) and `domain` should fall.
+* `d` should stay roughly between 0.5 and 2 (hinge loss); `d` near 0 means the discriminator is winning.
+* Validation **SSIM** (generated vs real target photo, same garment, new pose) should rise; L1 should fall.
+* Grid columns: exemplar | target layout | warped exemplar I_S | generated | real photo. The lower rows are a swap with no ground truth.
+""")
+code(r"""
+if RUN_TEXTURE_TRAINING:
+    print(tex.fit(max_steps=TEXTURE_MAX_STEPS))
+else:
+    print("Skipped (RUN_TEXTURE_TRAINING=False).")
+for which in EVAL_TEXTURE_CHECKPOINTS:
+    m = tex.evaluate_checkpoint(which)
+    print(f"{which:5s} step {m['step']}: SSIM {m['ssim']:.4f} | L1 {m['l1']:.4f} | warped L1 {m['warp_l1']:.4f} on {m['n_images']} pairs")
+""")
+code(r"""
+from PIL import Image
+from IPython.display import display
+tlog = tex.log.read()
+ttr = [r for r in tlog if r.get("kind") == "train"]; tva = [r for r in tlog if r.get("kind") == "val"]
+if ttr:
+    fig, ax = plt.subplots(1, 3, figsize=(13, 3))
+    st = [r["step"] for r in ttr]
+    for k in ("vgg", "warp", "domain", "cycle"):
+        ax[0].plot(st, [r.get(k, float("nan")) for r in ttr], label=k)
+    ax[0].legend(); ax[0].set_title("reconstruction / alignment losses")
+    ax[1].plot(st, [r.get("g_adv", float("nan")) for r in ttr], label="g_adv"); ax[1].plot(st, [r.get("d", float("nan")) for r in ttr], label="d")
+    ax[1].legend(); ax[1].set_title("adversarial (hinge)")
+    if tva:
+        ax[2].plot([r["step"] for r in tva], [r["ssim"] for r in tva], marker="o", label="val SSIM")
+        ax[2].plot([r["step"] for r in tva], [r["l1"] for r in tva], marker="s", label="val L1")
+        ax[2].legend(); ax[2].set_title("validation (cross-view pairs)")
+    plt.show()
+tgrids = sorted(tex.out_dir.glob("*_step*.png"))
+if tgrids:
+    print(tgrids[-1].name); display(Image.open(tgrids[-1]))
+""")
+
 for num, title, phase, body in [
     (11, "End-to-end inference", 6, "Upload two images and see `I_C`, `I_B`, `C_seg`, `B_seg`, `C'_seg` and `I_G`. Demo mode and trained models will be clearly labelled."),
     (12, "Evaluation", 7, "Fixed held-out sets. Mask metrics (mIoU, pixel accuracy) and image metrics (SSIM, LPIPS, FID) are kept separate. Published paper values are recorded only as references."),
@@ -443,7 +525,7 @@ code(r"""
 out_dir = paths.experiment_dir("outputs", cfg.experiment.name)
 for p in [out_dir / "config_resolved.yaml", Path(cfg.data.split_file),
           Path(cfg.paths.cache_dir) / "reports" / f"{cfg.data.dataset}_data_report.json", out_dir / "pretreatment_example",
-          trainer.ckpt.last]:
+          trainer.ckpt.last, tex.ckpt.last]:
     print(("OK      " if p.exists() else "MISSING ") + str(p))
 # Reload check: the saved config must reproduce the same settings in a fresh runtime
 assert load_config(out_dir / "config_resolved.yaml").to_dict() == cfg.to_dict()

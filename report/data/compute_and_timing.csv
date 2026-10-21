@@ -1,0 +1,12 @@
+item,value,unit,environment,measured_by
+SCHP-Pascal body-map precompute (12701 images),31.47,minutes,Colab T4,tqdm (31:28 at 6.83 it/s)
+warp step time CE only (batch 8 128px AMP),0.13-0.16,s/step,Colab T4,training log
+warp step time with GAN (batch 8 128px AMP),0.24,s/step,Colab T4,training log
+warp steps per epoch,1270,steps,batch 8 / 10160 train triplets,training log
+warp generator parameters (128px paper widths),66.6,million,-,model
+warp generator parameters (256px paper widths),92.8,million,-,model
+warp discriminator parameters,2.78,million,-,model
+peak GPU memory 8b overfit check (batch 2),2.01,GB,Colab T4,torch.cuda.max_memory_allocated
+SCHP checkpoint size (LIP / Pascal),255.1 / 255.0,MiB,-,file size
+SCHP inference CPU per image incl. model load,6-8,s,local CPU,wall clock
+warp overfit test 250 steps small model 64px,13.3,s,local CPU,wall clock

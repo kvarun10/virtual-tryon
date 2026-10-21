@@ -198,7 +198,7 @@ def image_to_tensor(image: np.ndarray) -> torch.Tensor:
     """``H x W x 3`` uint8 RGB -> ``3 x H x W`` float32 in [-1, 1]."""
     if image.ndim != 3 or image.shape[2] != 3 or image.dtype != np.uint8:
         raise ValueError(f"Expected H x W x 3 uint8 RGB, got {image.shape} {image.dtype}")
-    t = torch.from_numpy(np.ascontiguousarray(image)).permute(2, 0, 1).float()
+    t = torch.from_numpy(np.array(image, dtype=np.uint8, copy=True)).permute(2, 0, 1).float()  # copy: PIL arrays can be read-only
     return t / 127.5 - 1.0
 
 
@@ -214,4 +214,4 @@ def labels_to_tensor(label_map: np.ndarray) -> torch.Tensor:
     """``H x W`` uint8 -> ``H x W`` int64 (the dtype ``F.cross_entropy`` expects)."""
     if label_map.ndim != 2:
         raise ValueError(f"Expected H x W label map, got {label_map.shape}")
-    return torch.from_numpy(np.ascontiguousarray(label_map)).long()
+    return torch.from_numpy(np.array(label_map, copy=True)).long()

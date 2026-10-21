@@ -42,3 +42,5 @@ training:            # used from Phase 4 onwards
 
 model:
   texture_corr_size: 32        # 32 x 32 correspondence for 128 px images
+  generator_base_channels: 32  # texture SPADE width at 128 px (27 M params); extended config uses 64
+  # discriminator_base_channels stays 64: the warp checkpoint signature depends on it

@@ -1,0 +1,16 @@
+{
+  "dataset": "DeepFashion-MultiModal (images + parsing + keypoints archives)",
+  "images": 44096,
+  "images_with_manual_parsing": 12701,
+  "parsing_classes": 24,
+  "unparseable_names": 0,
+  "corrupt_images": 0,
+  "bad_parsing_maps_in_200_sample": 0,
+  "image_sizes_WxH": {"750x1101": 43928, "750x915": 165, "750x1100": 1, "2574x3861": 1, "750x1102": 1},
+  "split": {"method": "item-disjoint, seed 0, 80/10/10",
+            "train": {"images": 10160, "items": 5537, "items_with_2plus_views": 2189},
+            "val": {"images": 1271, "items": 687, "items_with_2plus_views": 260},
+            "test": {"images": 1270, "items": 678, "items_with_2plus_views": 252}},
+  "warp_train_triplets_with_cross_view_partner": 6812,
+  "source": "Colab run 2026-10-20 (notebook Section 6, Section 8b)"
+}

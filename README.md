@@ -9,13 +9,13 @@ allow, the three-stage virtual try-on pipeline from
 No official Dress-up code or weights exist. Every component is either re-implemented, replaced by
 a documented pretrained substitute, or not yet implemented. See `docs/implementation_deviations.md`.
 
-## Current status: Phase 4 code complete, not trained yet
+## Current status: warp trained (baseline); texture code complete, not trained yet
 
 | Stage | What it does | Status |
 |---|---|---|
 | A. Pre-treatment | reference photo → clothing map **C_seg**; target photo → body-part map **B_seg** | ✅ implemented (pretrained SCHP parsers, DFMM annotations) |
 | B. Warp | dual-path U-Net: C_seg + B_seg → garment layout on the target body **C'_seg** | 🧪 implemented and tested; **real-data training not run yet** |
-| C. Texture | correspondence alignment + SPADE generator → final image **I_G** | ⏳ Phase 5 |
+| C. Texture | correspondence alignment + SPADE generator → final image **I_G** | 🧪 implemented and tested; **real-data training not run yet** |
 | Garment-only references (product photos) | not in the paper | 🧪 experimental preprocessing only |
 
 **There is no try-on output yet.** `try_on()` runs Stage A and then stops with an explicit
@@ -104,7 +104,7 @@ Overrides: `load_config(path, ["data.image_size=[256,256]", "training.batch_size
 
 ## Training, resuming, inference and evaluation
 
-* **Training the warp stage:** notebook Sections 8–10, or `python scripts/precompute_body_maps.py --config configs/colab_baseline.yaml` once, then `python -m src.training.train_warp --config configs/colab_baseline.yaml --max-steps 2000`. Re-running the same command resumes from `checkpoints/<experiment>/warp/last.pt`. Texture training comes in Phase 5.
+* **Training the warp stage:** notebook Sections 8–10, or `python scripts/precompute_body_maps.py --config configs/colab_baseline.yaml` once, then `python -m src.training.train_warp --config configs/colab_baseline.yaml --max-steps 2000`. Re-running the same command resumes from `checkpoints/<experiment>/warp/last.pt`. Texture stage: notebook Sections 9–10b, or `python -m src.training.train_texture --config configs/colab_baseline.yaml --override training.allow_vgg_download=true --max-steps 2000`.
 * **Inference:** `try_on(reference, target, cfg, stop_after="pretreatment")` returns C_seg and B_seg.
 * **Evaluation now:** `evaluate_clothing_parser()` measures a parser against DFMM's manual parsing (pixel
   accuracy and mIoU in `garment12`, background excluded from mIoU). Image metrics (SSIM, LPIPS, FID) come in Phase 7.
