@@ -178,4 +178,4 @@ One row per finished run, filled from its `results.json` by code. The paired-dif
 
 | Exp | Run name | Date | Primary metric (val) | Δ vs B0 [95 % CI] | Secondary | Decision |
 |---|---|---|---|---|---|---|
-| B0 | warp_pf / texture_pf | pending (Phase 7 val run) | | | | baseline |
+| B0 | warp_pf / texture_pf | 2026-10-22 | warp mIoU 0.715; T5 SSIM 0.442 / LPIPS 0.075; T4 LPIPS 0.050 | – | swap area 0.879; T6 SSIM 0.438; FID 23.67 | baseline (`report/data/final_eval_val_20261022.md`) |
