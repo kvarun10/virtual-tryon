@@ -239,3 +239,17 @@ Pair analysis: 16,029 same-item pairs, 72.8% identical garment classes, median m
 
 **Not run yet:** no LPIPS / FID weights downloaded, no evaluation on real validation or test data. The protocol
 (`docs/final_evaluation.md`) and the roadmap (`docs/experiments.md`) were written before any test-split number exists.
+
+## Phase 7: official test-split evaluation (2026-10-22, Colab T4, commit af0a2ca)
+
+Run once, all six parts, no limit (`earlier test-split runs: 0`). Full table: `report/data/final_eval_test_20261022.md`;
+summary and interpretation: `report/results_table.md`, `docs/paper_comparison.md`.
+Headline: parser mIoU 0.616; warp mIoU 0.708; paired try-on on 357 pairs SSIM / LPIPS: true layout 0.573 / 0.052,
+end-to-end 0.431 / 0.078, fully automatic 0.422 / 0.081, copy 0.181 / 0.122; FID 23.99 (real-vs-real floor 14.47),
+KID 0.0073 (floor 0.0003); 737 ms per try-on, 2.7 GB peak GPU memory.
+The validation final-eval run also finished; its numbers are recorded once its export is downloaded.
+
+## Own-photo try-on (2026-10-22)
+
+`scripts/tryon.py` runs the trained models on any photos (CPU or GPU); the notebook upload cell works on its own.
+Verified on the synthetic fixture (`tests/test_tryon.py`); not yet run on real photos with the trained weights.

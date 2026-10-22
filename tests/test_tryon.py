@@ -7,6 +7,7 @@ loading, identity handling and evaluation code, not image quality.
 from pathlib import Path
 
 import numpy as np
+from PIL import Image
 import pytest
 
 from src.config import load_config
@@ -104,3 +105,24 @@ def test_end_to_end_evaluation_and_swap_grid(trained, tmp_path):
     assert out["pairs"] == 3 and (tmp_path / "e2e.png").is_file()
     grid = tryon_swap_grid(models, prepared, cfg, split="train", n=3, path=tmp_path / "swap.png")
     assert grid is not None and grid.shape[1] == 6 * 64
+
+
+def test_tryon_script_on_folders(trained, tmp_path):
+    import shutil
+
+    from scripts.tryon import main
+
+    cfg, prepared, _ = trained
+    refs, tgts = tmp_path / "refs", tmp_path / "tgts"
+    refs.mkdir(); tgts.mkdir()
+    recs = prepared.records("train")
+    for d, r in ((refs, recs[0]), (tgts, recs[3]), (tgts, recs[5])):
+        shutil.copy(prepared.index.root / r.image, d / f"{r.name}{Path(r.image).suffix}")
+    drive = Path(cfg.paths.drive_root)
+    rc = main(["--reference", str(refs), "--target", str(tgts), "--out", str(tmp_path / "out"),
+               "--config", str(ROOT / "configs" / "colab_smoke_test.yaml"), "--drive-root", str(drive),
+               "--device", "cpu", "--dataset-keys", *sum((["--override", o] for o in SMALL), [])])
+    assert rc == 0
+    summary = np.array(Image.open(tmp_path / "out" / "summary.png"))
+    assert summary.shape == (2 * 64, 3 * 64, 3)
+    assert len(list((tmp_path / "out").glob("*__on__*/overview.png"))) == 2

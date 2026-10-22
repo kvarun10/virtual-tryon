@@ -39,6 +39,7 @@ Evidence paths refer to `report/` (numbers, charts), `docs/`, and `tests/`. Date
 | P26 | 10-21 | Metrics | Texture validation silently mixed easy "pseudo" pairs with real pose-change pairs | fixed (metric v3) |
 | P27 | 10-21 | Stage C | 6.5× more texture training gave only +0.01 SSIM on real pose-change pairs | open (analysis) |
 | P28 | 10-22 | Metrics | Risk of tuning on the test split; whole-image metrics flattered by background and pasted faces | fixed (protocol + guard) |
+| P29 | 10-22 | Usability | Own-photo try-on only ran inside the notebook after the full validation evaluation | fixed (`scripts/tryon.py`, standalone cell) |
 
 ---
 
@@ -245,6 +246,18 @@ Evidence paths refer to `report/` (numbers, charts), `docs/`, and `tests/`. Date
   compared on identical pairs with a bootstrap interval; decisions in Phase 8 use validation only.
 * **Evidence:** `tests/test_final_eval.py`, `tests/test_image_metrics.py`.
 * **Status:** fixed (protocol and guard in place; the test split had not been evaluated when this was written).
+
+### P29 – Own-photo try-on was hard to reach (Phase 7)
+* **Symptom:** the upload cell in Section 11 only worked when `RUN_TRYON_EVAL=True`, i.e. after the full validation
+  evaluation, and there was no way to run a try-on on a PC.
+* **Action:** `scripts/tryon.py` (any reference/target image or folder, CPU or GPU, `last.pt` or the small
+  `generator_only.pt` backups); the notebook cell now loads the models itself. Test: `tests/test_tryon.py::test_tryon_script_on_folders`.
+* **Status:** fixed.
+
+**Test-split confirmation of earlier findings (2026-10-22):** P11 (parser): first quantitative parser score on DFMM,
+mIoU 0.616 on the test split; automatic Stage A lowers warp mIoU 0.684 → 0.474 but SSIM only 0.431 → 0.422.
+P12 (silhouette leak): in the test realism grid a long-sleeved shirt on a tank-top target came out sleeveless.
+P19: outer is still the weakest class (0.548 IoU on test).
 
 ---
 

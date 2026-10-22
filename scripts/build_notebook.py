@@ -563,7 +563,7 @@ md(r"""
 The full pipeline: Stage A, then warp (C'_seg), then the target's face/hair labels (paper Sec. 4.2), then texture, then the target's face/hair pixels pasted back.
 * **Paired evaluation** (validation pairs of the same item, the real photo is the answer): scored on garment + skin pixels only. Face/hair are pasted from the target, so they are excluded. Compared with the texture stage given the ground-truth layout (upper bound) and with copying the exemplar (lower bound).
 * **Swap grid:** real try-on between different items (no answer).
-* **Your own photos:** set `RUN_UPLOAD_TRYON=True`; uses SCHP for Stage A.
+* **Your own photos:** set `RUN_UPLOAD_TRYON=True` in the cell below and run just that cell (works without `RUN_TRYON_EVAL`); uses SCHP for Stage A. On your PC: `python scripts/tryon.py --reference <img> --target <img>`.
 """)
 code(r"""
 from src.inference.tryon import load_tryon_models
@@ -586,16 +586,31 @@ else:
     print("Skipped (RUN_TRYON_EVAL=False).")
 """)
 code(r"""
-# Your own photos: reference (person wearing the garment) and target person. Uses SCHP for Stage A.
+# Your own photos. Set RUN_UPLOAD_TRYON=True and run this cell on its own (after Sections 0-5; no dataset needed).
+# Upload 2 images when asked: FIRST the reference (a person WEARING the garment), SECOND the target person.
+# Best: full body, front-facing, one person, plain background. Output is 128 x 128 (model resolution).
 RUN_UPLOAD_TRYON = False
-if RUN_UPLOAD_TRYON and IN_COLAB and RUN_TRYON_EVAL:
+if RUN_UPLOAD_TRYON and IN_COLAB:
     from google.colab import files
     import io
+    from PIL import Image
+    from IPython.display import display
+    from src.data.preprocessing import load_image
+    from src.inference.pipeline import PreTreatment, try_on
+    from src.inference.tryon import load_tryon_models
+    if globals().get("models") is None:
+        models = load_tryon_models(cfg, warp=TRYON_WARP_CKPT, texture=TRYON_TEXTURE_CKPT)
+    if globals().get("pre") is None:
+        pre = PreTreatment(cfg)
     up = files.upload()
+    if len(up) < 2:
+        raise ValueError("Upload two images: reference first, then target.")
     (rn, rb), (tn, tb_) = list(up.items())[:2]
     ref_u, tgt_u = load_image(Image.open(io.BytesIO(rb))), load_image(Image.open(io.BytesIO(tb_)))
-    r = try_on(ref_u, tgt_u, cfg, pretreatment=pre, models=models, save_dir=e2e_dir / "upload")
-    display(Image.open(e2e_dir / "upload" / "overview.png"))
+    up_dir = paths.experiment_dir("outputs", cfg.experiment.name) / "my_tryon" / f"{Path(rn).stem}__on__{Path(tn).stem}"
+    r = try_on(ref_u, tgt_u, cfg, pretreatment=pre, models=models, save_dir=up_dir)
+    print("saved to", up_dir)
+    display(Image.open(up_dir / "overview.png"))
     print("columns: reference | C_seg | target | B_seg | C'_seg | layout | warped I_S | generated | result")
 """)
 
