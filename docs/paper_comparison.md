@@ -41,7 +41,9 @@ reasons are listed in section 3. Within our own fixed protocol the system behave
    0.883 SSIM on the whole image but 0.540 on the person region.
 5. **FID depends on sample size and resolution.** Even two sets of *real* photos score FID 14.47 in our setting
    (1,270 vs 1,271 images at 128 px). That is already worse than the paper's 8.60, so our FID cannot be read on the
-   paper's scale.
+   paper's scale. Measured directly: real train (10,160) vs real validation (1,271) photos give FID 9.11, but real
+   validation vs real test (1,271 vs 1,270) give 14.47. Only the sample size changed, so FID cannot be compared
+   across different sample sizes.
 
 ## 4. Side by side, with the closest analogue of each number
 
@@ -69,7 +71,8 @@ variant was scored on the same 357 test pairs.
 * **Visible failure in the test grids:** a long-sleeved shirt put on a person wearing a tank top came out
   *sleeveless*. The body map follows the target's own clothing outline (P12). The swap metrics measure the same
   effect (class-area agreement 0.875).
-* **Generalisation:** test numbers match validation within 0.01 (warp 0.708 vs 0.715; texture 0.573 vs 0.576), so the
+* **Generalisation:** test numbers match validation within about 0.01 (warp 0.708 vs 0.715; texture 0.573 vs 0.576;
+  full automatic try-on 0.427 vs 0.438; FID 23.99 vs 23.67), so the
   model choices were not tuned to the validation split.
 * **Speed:** 0.74 s per try-on on a T4 at 128 px. 93 % of that time is the two SCHP parsers; warp + texture take 42 ms.
   The paper reports no speed figures. Peak GPU memory is 2.7 GB.
