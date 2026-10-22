@@ -587,7 +587,8 @@ else:
 """)
 code(r"""
 # Your own photos. Set RUN_UPLOAD_TRYON=True and run this cell on its own (after Sections 0-5; no dataset needed).
-# Upload 2 images when asked: FIRST the reference (a person WEARING the garment), SECOND the target person.
+# Upload 2 images when asked. The file that sorts FIRST by name is the reference (person WEARING the garment), the
+# second is the target person, e.g. name them 1_reference.jpg and 2_target.jpg (upload order is not reliable).
 # Best: full body, front-facing, one person, plain background. Output is 128 x 128 (model resolution).
 RUN_UPLOAD_TRYON = False
 if RUN_UPLOAD_TRYON and IN_COLAB:
@@ -605,7 +606,8 @@ if RUN_UPLOAD_TRYON and IN_COLAB:
     up = files.upload()
     if len(up) < 2:
         raise ValueError("Upload two images: reference first, then target.")
-    (rn, rb), (tn, tb_) = list(up.items())[:2]
+    (rn, rb), (tn, tb_) = sorted(up.items())[:2]
+    print("reference:", rn, "| target:", tn)
     ref_u, tgt_u = load_image(Image.open(io.BytesIO(rb))), load_image(Image.open(io.BytesIO(tb_)))
     up_dir = paths.experiment_dir("outputs", cfg.experiment.name) / "my_tryon" / f"{Path(rn).stem}__on__{Path(tn).stem}"
     r = try_on(ref_u, tgt_u, cfg, pretreatment=pre, models=models, save_dir=up_dir)
