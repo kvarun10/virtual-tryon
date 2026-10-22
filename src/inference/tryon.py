@@ -17,6 +17,7 @@ mask edge. Documented as deviation D23.
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, Optional, Union
@@ -92,6 +93,12 @@ def _one_hot(lab: np.ndarray, k: int, device) -> torch.Tensor:
     return F.one_hot(t, k).permute(2, 0, 1).float()[None]
 
 
+def _clock(device) -> float:
+    if torch.device(device).type == "cuda":
+        torch.cuda.synchronize(device)
+    return time.perf_counter()
+
+
 def feather(mask: np.ndarray, sigma: float = 1.0) -> np.ndarray:
     from scipy import ndimage
 
@@ -100,8 +107,12 @@ def feather(mask: np.ndarray, sigma: float = 1.0) -> np.ndarray:
 
 @torch.no_grad()
 def tryon_core(models: TryOnModels, ref_image: np.ndarray, ref_parse: np.ndarray, target_image: np.ndarray,
-               target_body: np.ndarray, target_parse: np.ndarray, feather_sigma: float = 1.0) -> Dict[str, np.ndarray]:
-    """All inputs already at model resolution: RGB uint8 [H,W,3]; parses garment12 [H,W]; body in the body label set."""
+               target_body: np.ndarray, target_parse: np.ndarray, feather_sigma: float = 1.0,
+               timings: Optional[Dict[str, float]] = None) -> Dict[str, np.ndarray]:
+    """All inputs already at model resolution: RGB uint8 [H,W,3]; parses garment12 [H,W]; body in the body label set.
+
+    ``timings``: if a dict is given, seconds for ``warp`` and ``texture`` (incl. identity paste) are written into it
+    (CUDA synchronised)."""
     cfg, dev = models.cfg, models.device
     G = get_label_set(cfg.labels.garment_label_set)
     Kb = get_label_set(cfg.labels.body_label_set).num_classes
@@ -110,11 +121,13 @@ def tryon_core(models: TryOnModels, ref_image: np.ndarray, ref_parse: np.ndarray
                       ("target_body", target_body), ("target_parse", target_parse)):
         if arr.shape[:2] != size:
             raise ValueError(f"{name} has size {arr.shape[:2]}, expected model size {size}")
+    t0 = _clock(dev)
     c_seg = keep_classes(ref_parse, G, cfg.labels.transfer_classes)
     logits = models.warp(_one_hot(c_seg, G.num_classes, dev), _one_hot(target_body, Kb, dev)).float()
     logits[:, models.untrained_ids] = -torch.inf
     c_warp = logits.argmax(1)[0].cpu().numpy().astype(np.uint8)
     layout = inject_identity_labels(c_warp, target_parse, G, cfg.labels.preserve_classes)  # paper Sec. 4.2
+    t1 = _clock(dev)
     out = models.texture(_one_hot(layout, G.num_classes, dev), image_to_tensor(ref_image)[None].to(dev),
                          _one_hot(ref_parse, G.num_classes, dev))
     raw = tensor_to_image(out["fake"][0].float().cpu())
@@ -122,6 +135,8 @@ def tryon_core(models: TryOnModels, ref_image: np.ndarray, ref_parse: np.ndarray
     ident = np.isin(layout, G.indices(cfg.labels.preserve_classes))
     m = feather(ident, feather_sigma)[..., None]
     result = (m * target_image.astype(np.float32) + (1 - m) * raw.astype(np.float32)).round().astype(np.uint8)
+    if timings is not None:
+        timings["warp"], timings["texture"] = t1 - t0, _clock(dev) - t1
     return {"c_seg": c_seg, "c_warp": c_warp, "layout": layout, "warped_exemplar": tensor_to_image(warped),
             "raw": raw, "result": result, "identity_mask": ident}
 

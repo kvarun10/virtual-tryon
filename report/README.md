@@ -17,7 +17,10 @@ report/
 commercial use of its images and derived data; your test photos are personal. You may still decide to
 put selected private figures in an academic report; check your institution's rules and cite the dataset.
 
-Problems met and how they were tackled (P01–P25, with evidence links): `docs/problems_log.md`.
+Problems met and how they were tackled (P01–P28, with evidence links): `docs/problems_log.md`.
+
+Final results table (ours, validation and test, next to the paper's published values but never mixed): `results_table.md`.
+Evaluation protocol: `docs/final_evaluation.md`; experiment roadmap: `docs/experiments.md`.
 
 New runs: export the training log with
 `python scripts/export_run_logs.py --log <drive>/logs/<experiment>/<stage>_train.jsonl --out report/data --name <run>`

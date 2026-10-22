@@ -224,3 +224,18 @@ Pair analysis: 16,029 same-item pairs, 72.8% identical garment classes, median m
 * **End-to-end** (warp_pf + texture_pf, same 260 pairs, garment + skin region): SSIM 0.442 (pasted 0.447), L1 0.126;
   copy-exemplar 0.195. Warp errors cost ~0.13 SSIM.
 * Fixed afterwards: texture validation counts real cross-view pairs only (metric v3).
+
+## Phase 7: final evaluation code (2026-10-22, local CPU only)
+
+| Check | How | Result |
+|---|---|---|
+| FID maths | Two Gaussians with a mean shift of 2 in 8 dimensions (expected 32) and identical sets (expected 0) | within 5 % of 32; 0 |
+| KID unbiasedness | Two samples of the same distribution vs a shifted one | ≈ 0 (within 3 std) vs clearly > 0 |
+| LPIPS masking | Images differing only outside the mask | distance 0 inside the mask, > 0 without it |
+| Weight gating | No cached weights, download not allowed | clear error naming the file, size and the setting |
+| Test-split guard and audit log | `split="test"` without confirmation; confirmed run | refused; start + finished entries appended |
+| Runner wiring | All six parts on the synthetic fixture with 2-step models | all metrics finite, results.json / results_table.md / grids written |
+| Full suite | `python -m pytest` | 138 passed |
+
+**Not run yet:** no LPIPS / FID weights downloaded, no evaluation on real validation or test data. The protocol
+(`docs/final_evaluation.md`) and the roadmap (`docs/experiments.md`) were written before any test-split number exists.

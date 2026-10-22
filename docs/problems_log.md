@@ -38,6 +38,7 @@ Evidence paths refer to `report/` (numbers, charts), `docs/`, and `tests/`. Date
 | P25 | 10-21 | Data | 165 images are 750×915, one is 2574×3861; full annotation check not run | open (check) |
 | P26 | 10-21 | Metrics | Texture validation silently mixed easy "pseudo" pairs with real pose-change pairs | fixed (metric v3) |
 | P27 | 10-21 | Stage C | 6.5× more texture training gave only +0.01 SSIM on real pose-change pairs | open (analysis) |
+| P28 | 10-22 | Metrics | Risk of tuning on the test split; whole-image metrics flattered by background and pasted faces | fixed (protocol + guard) |
 
 ---
 
@@ -232,6 +233,18 @@ Evidence paths refer to `report/` (numbers, charts), `docs/`, and `tests/`. Date
   partner, so most texture training is on easy pseudo pairs; (b) the weak adversarial signal leaves outputs blurry;
   (c) 128 px resolution.
 * **Status:** open. Warp errors still cost more (end-to-end 0.442 vs 0.576 with the ground-truth layout).
+
+### P28 – Keeping the final evaluation honest (Phase 7)
+* **Risk:** with several metrics, variants and checkpoints, repeated test-split runs would let choices be tuned to
+  the test data; whole-image SSIM/LPIPS/FID would also be flattered by the white background (P20) and by the
+  target's own face/hair pixels that the pipeline pastes back (D23).
+* **Action:** the protocol (`docs/final_evaluation.md`) was written before the first test run; the code refuses
+  `split="test"` without explicit confirmation and logs every test run, unfinished ones included, to
+  `test_split_log.jsonl`; paired metrics use only garment + skin pixels (LPIPS with everything else set to white in both
+  images); FID is reported with KID and a real-vs-real noise floor; per-pair scores are stored so experiments are
+  compared on identical pairs with a bootstrap interval; decisions in Phase 8 use validation only.
+* **Evidence:** `tests/test_final_eval.py`, `tests/test_image_metrics.py`.
+* **Status:** fixed (protocol and guard in place; the test split had not been evaluated when this was written).
 
 ---
 
