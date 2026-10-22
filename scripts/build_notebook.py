@@ -77,6 +77,12 @@ RUN_TRYON_EVAL = False             # paired end-to-end evaluation + demo grids (
 TRYON_WARP_CKPT = "last"           # last | best | path
 TRYON_TEXTURE_CKPT = "last"
 TRYON_EVAL_LIMIT = None            # None = all validation pairs
+# --- Phase 7: final evaluation (docs/final_evaluation.md) ----------------------------------------------
+RUN_FINAL_EVAL = False             # Section 12: parser, warp, paired SSIM/L1/LPIPS, FID/KID, timing
+FINAL_SPLIT = "val"                # "val" for checks; "test" ONLY for the one final, logged run
+FINAL_PARTS = ["parser", "warp", "paired", "realism", "noise_floor", "timing"]
+FINAL_LIMIT = None                 # None = everything (official); a number = quick check, marked NOT official
+ALLOW_METRIC_DOWNLOAD = False      # once: LPIPS AlexNet (~233 MB) + FID Inception (~92 MB), cached in <drive>/pretrained/torch
 EXPORT_RESULTS = True              # copy all logs/metrics/grids of this session to <drive>/report_exports (Section 14)
 SECURE_RESULTS = True              # verify every checkpoint loads, save small generator-only backups (Section 14)
 PRUNE_SNAPSHOTS = False            # True: delete redundant step_*.pt snapshots after verification (keeps last.pt + best.pt)
@@ -218,6 +224,8 @@ if ALLOW_WEIGHT_DOWNLOAD:
     overrides.append("segmentation.allow_weight_download=true")
 if ALLOW_VGG_DOWNLOAD:
     overrides.append("training.allow_vgg_download=true")
+if ALLOW_METRIC_DOWNLOAD:
+    overrides.append("evaluation.allow_metric_download=true")
 cfg = load_config(CONFIG_FILE, overrides)
 paths = ProjectPaths.from_config(cfg).ensure()
 seed_everything(cfg.experiment.seed, cfg.experiment.deterministic)
@@ -591,11 +599,33 @@ if RUN_UPLOAD_TRYON and IN_COLAB and RUN_TRYON_EVAL:
     print("columns: reference | C_seg | target | B_seg | C'_seg | layout | warped I_S | generated | result")
 """)
 
-for num, title, phase, body in [
-    (12, "Evaluation (FID, LPIPS)", 7, "Distribution metrics need thousands of generated images; added after the models are trained longer."),
-    (13, "Experiments", 8, "Config-driven experiment runs and a comparison table (see `docs/experiments.md`)."),
-]:
-    md(f"## {num}. {title}\n**Not implemented yet. Planned for Phase {phase}.** {body}")
+md(r"""
+## 12. Final evaluation (Phase 7)
+Protocol, fixed **before** the first test run: `docs/final_evaluation.md` (measurements T1-T10).
+* `FINAL_SPLIT="val"`: any number of runs, used for decisions. `FINAL_SPLIT="test"`: reserved for final reporting; every run is appended to `<drive>/cache/test_split_log.jsonl`, unfinished ones too.
+* LPIPS and FID need pretrained networks: set `ALLOW_METRIC_DOWNLOAD=True` once (~233 MB AlexNet from download.pytorch.org, ~92 MB Inception from the pytorch-fid GitHub release); they are cached in `<drive>/pretrained/torch`.
+* Each part is saved to `results.json` / `results_table.md` as soon as it finishes, in `<drive>/outputs/<experiment>/final_eval/<split>_<time>/`.
+* Estimated time on a T4 per split: about 15-40 min (not yet measured; slowest parts: SCHP over all images, the FID try-ons).
+""")
+code(r"""
+from src.evaluation.final_eval import read_test_log, run_final_evaluation
+final = None
+if RUN_FINAL_EVAL and not DRY_RUN:
+    models = load_tryon_models(cfg, warp=TRYON_WARP_CKPT, texture=TRYON_TEXTURE_CKPT)
+    print("models:", models.info)
+    if FINAL_SPLIT == "test":
+        print("earlier test-split runs:", sum(e.get("event") == "start" for e in read_test_log(cfg)))
+    final = run_final_evaluation(cfg, prepared, models, split=FINAL_SPLIT, confirm_test=(FINAL_SPLIT == "test"),
+                                 parts=FINAL_PARTS, limit=FINAL_LIMIT)
+    print(Path(final["out_dir"], "results_table.md").read_text())
+    for g in ("paired_grid.png", "realism_grid.png"):
+        if Path(final["out_dir"], g).is_file():
+            print(g); display(Image.open(Path(final["out_dir"], g)))
+else:
+    print("Skipped (RUN_FINAL_EVAL=False or DRY_RUN).")
+""")
+
+md("## 13. Experiments\n**Planned for Phase 8.** The roadmap is `docs/experiments.md`; each experiment is a config file plus a run on the validation split.")
 
 md("## 14. Saving and exporting\nWith `EXPORT_RESULTS=True` everything this session produced (training logs as CSV, evaluation metrics, grids, pair statistics) is copied to `<drive>/report_exports/<date-time>/`. Download that folder from Drive and put it in the project under `report/private/exports/`; no need to copy numbers by hand.")
 code(r"""
@@ -614,6 +644,11 @@ if EXPORT_RESULTS and not DRY_RUN:
         (exp_dir / "end_to_end_metrics.json").write_text(_json.dumps(e2e, indent=1, default=str))
         for g in (Path(e2e["grid"]).parent).glob("*.png"):
             shutil.copy(g, exp_dir / f"tryon_{g.name}")
+    if globals().get("final"):
+        shutil.copytree(final["out_dir"], exp_dir / f"final_eval_{final['split']}", dirs_exist_ok=True)
+        from src.evaluation.final_eval import test_log_path
+        if test_log_path(cfg).is_file():
+            shutil.copy(test_log_path(cfg), exp_dir / "test_split_log.jsonl")
     pq = paths.experiment_dir("outputs", cfg.experiment.name) / "pair_quality"
     if pq.is_dir():
         shutil.copytree(pq, exp_dir / "pair_quality", dirs_exist_ok=True)

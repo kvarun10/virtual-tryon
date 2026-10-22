@@ -13,6 +13,8 @@ matplotlib>=3.7
 pyyaml>=6.0
 tqdm>=4.65
 gdown>=5.1                       # only used when you explicitly allow weight downloads
+lpips>=0.1.4                     # Phase 7 LPIPS (BSD-2); AlexNet backbone downloaded only with permission
+pytorch-fid>=0.3.0               # Phase 7 FID/KID (Apache-2.0); Inception weights downloaded only with permission
 
 # Optional backends (installed only if you select them in the config):
 # transformers>=4.40             # segformer_clothes backend (NVIDIA SegFormer licence, non-commercial)

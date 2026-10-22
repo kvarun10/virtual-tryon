@@ -210,6 +210,16 @@ class ModelConfig:  # warp fields used from Phase 4; texture fields reserved for
 
 
 @dataclass
+class EvaluationConfig:  # Phase 7 final evaluation (docs/final_evaluation.md)
+    allow_metric_download: bool = False  # LPIPS AlexNet (~233 MB) + FID Inception (~92 MB), downloaded once
+    metric_weights_dir: str = ""  # torch-hub cache for those weights; "" -> <paths.pretrained_dir>/torch
+    kid_subsets: int = 100
+    kid_subset_size: int = 500
+    timing_runs: int = 20  # single-image runs after warm-up
+    test_log: str = ""  # audit log of test-split runs; "" -> <paths.cache_dir>/test_split_log.jsonl
+
+
+@dataclass
 class ProjectConfig:
     experiment: ExperimentConfig = field(default_factory=ExperimentConfig)
     paths: PathsConfig = field(default_factory=PathsConfig)
@@ -219,6 +229,7 @@ class ProjectConfig:
     reference: ReferenceConfig = field(default_factory=ReferenceConfig)
     training: TrainingConfig = field(default_factory=TrainingConfig)
     model: ModelConfig = field(default_factory=ModelConfig)
+    evaluation: EvaluationConfig = field(default_factory=EvaluationConfig)
 
     def to_dict(self) -> Dict[str, Any]:
         return dataclasses.asdict(self)
