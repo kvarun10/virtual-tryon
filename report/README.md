@@ -20,7 +20,9 @@ put selected private figures in an academic report; check your institution's rul
 Problems met and how they were tackled (P01–P28, with evidence links): `docs/problems_log.md`.
 
 Final results table (ours, validation and test, next to the paper's published values but never mixed): `results_table.md`.
-Evaluation protocol: `docs/final_evaluation.md`; experiment roadmap: `docs/experiments.md`.
+Evaluation protocol: `docs/final_evaluation.md`; experiment roadmap: `docs/experiments.md`;
+comparison with the paper (and why the numbers cannot be ranked): `docs/paper_comparison.md`.
+Official test results (2026-10-22): `data/final_eval_test_20261022.md`.
 
 New runs: export the training log with
 `python scripts/export_run_logs.py --log <drive>/logs/<experiment>/<stage>_train.jsonl --out report/data --name <run>`
