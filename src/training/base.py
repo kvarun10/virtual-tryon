@@ -28,7 +28,7 @@ from torch.utils.data import DataLoader
 
 from src.config import ProjectConfig
 from src.data.dataset import PreparedData, prepare_dataset
-from src.training.checkpointing import CheckpointManager, rng_state, set_rng_state
+from src.training.checkpointing import CheckpointManager, ensure_not_frozen, rng_state, set_rng_state
 from src.utils.device import select_device
 from src.utils.logging import JsonlLogger
 from src.utils.paths import ProjectPaths
@@ -156,6 +156,7 @@ class GANTrainer:
     def fit(self, max_steps: Optional[int] = None, resume: bool = True, time_limit_min: Optional[float] = None) -> Dict:
         """Train until ``max_steps`` (or epochs). ``time_limit_min``: stop cleanly (validate + save) once this
         much wall-clock time has passed, so a Colab session keeps time for evaluation; re-run to continue."""
+        ensure_not_frozen(self.ckpt.dir)  # never train into the frozen baseline
         if resume:
             self.resume()
         t_start = time.time()

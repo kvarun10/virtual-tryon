@@ -40,6 +40,7 @@ Evidence paths refer to `report/` (numbers, charts), `docs/`, and `tests/`. Date
 | P27 | 10-21 | Stage C | 6.5× more texture training gave only +0.01 SSIM on real pose-change pairs | open (analysis) |
 | P28 | 10-22 | Metrics | Risk of tuning on the test split; whole-image metrics flattered by background and pasted faces | fixed (protocol + guard) |
 | P29 | 10-22 | Usability | Own-photo try-on only ran inside the notebook after the full validation evaluation | fixed (`scripts/tryon.py`, standalone cell) |
+| P30 | 10-24 | Workflow | Experiments could overwrite the baseline shown to the supervisor | fixed (tag, FROZEN guard, own folders) |
 
 ---
 
@@ -258,6 +259,14 @@ Evidence paths refer to `report/` (numbers, charts), `docs/`, and `tests/`. Date
 mIoU 0.616 on the test split; automatic Stage A lowers warp mIoU 0.684 → 0.474 but SSIM only 0.431 → 0.422.
 P12 (silhouette leak): in the test realism grid a long-sleeved shirt on a tank-top target came out sleeveless.
 P19: outer is still the weakest class (0.548 IoU on test).
+
+### P30 – Protecting the baseline from experiments (Phase 8)
+* **Risk:** experiments re-use the same notebook, configs and Drive folders as the baseline B0 that is shown to the
+  supervisor; a wrong run name or resumed run could overwrite B0's checkpoints or change its code path.
+* **Action:** git tag `baseline-v1`; FROZEN marker on B0's checkpoint folders (training, saving and pruning refused,
+  `FrozenRunError`); each experiment in its own `experiment.name`; new options default to B0 behaviour; tests in
+  `tests/test_experiments.py` (B0 config unchanged, guard blocks writes, file untouched).
+* **Status:** fixed.
 
 ---
 

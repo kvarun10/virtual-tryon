@@ -74,8 +74,8 @@ TEXTURE_TIME_LIMIT_MIN = None
 
 # --- Phase 6: end-to-end try-on ------------------------------------------------------------------
 RUN_TRYON_EVAL = False             # paired end-to-end evaluation + demo grids (Section 11)
-TRYON_WARP_CKPT = "last"           # last | best | path
-TRYON_TEXTURE_CKPT = "last"
+TRYON_WARP_CKPT = None             # None = from the config (evaluation.warp_checkpoint, normally "last"); or last | best | path
+TRYON_TEXTURE_CKPT = None
 TRYON_EVAL_LIMIT = None            # None = all validation pairs
 # --- Phase 7: final evaluation (docs/final_evaluation.md) ----------------------------------------------
 RUN_FINAL_EVAL = False             # Section 12: parser, warp, paired SSIM/L1/LPIPS, FID/KID, timing
@@ -234,6 +234,14 @@ print("dataset    :", cfg.data.dataset, "at", cfg.data.root)
 print("image size :", cfg.data.image_size, "| backends:", cfg.segmentation.clothing_backend, "/", cfg.segmentation.body_backend)
 print("storage    :", paths.drive_root.resolve())
 save_config(cfg, paths.experiment_dir("outputs", cfg.experiment.name) / "config_resolved.yaml")
+# The Phase 7 baseline B0 is frozen: no training run can ever write into these folders (docs/experiments.md).
+if not DRY_RUN:
+    from src.training.checkpointing import freeze_run, is_frozen
+    for _run in ("warp_pf", "texture_pf"):
+        _d = paths.checkpoints / "baseline_128" / _run
+        if (_d / "last.pt").is_file():
+            freeze_run(_d, "B0 baseline: official Phase 7 evaluation 2026-10-22 (tag baseline-v1)")
+            print("frozen baseline:", _d, is_frozen(_d))
 """)
 
 md(r"""
@@ -570,7 +578,7 @@ from src.inference.tryon import load_tryon_models
 from src.evaluation.end_to_end import evaluate_end_to_end, tryon_swap_grid
 e2e = None
 if RUN_TRYON_EVAL:
-    models = load_tryon_models(cfg, warp=TRYON_WARP_CKPT, texture=TRYON_TEXTURE_CKPT)
+    models = load_tryon_models(cfg, warp=TRYON_WARP_CKPT or cfg.evaluation.warp_checkpoint, texture=TRYON_TEXTURE_CKPT or cfg.evaluation.texture_checkpoint)
     print("models:", models.info)
     e2e_dir = paths.experiment_dir("outputs", cfg.experiment.name) / "tryon"; e2e_dir.mkdir(exist_ok=True)
     e2e = evaluate_end_to_end(models, prepared, cfg, split="val", limit=TRYON_EVAL_LIMIT, grid_path=e2e_dir / "e2e_val_grid.png")
@@ -600,7 +608,7 @@ if RUN_UPLOAD_TRYON and IN_COLAB:
     from src.inference.pipeline import PreTreatment, try_on
     from src.inference.tryon import load_tryon_models
     if globals().get("models") is None:
-        models = load_tryon_models(cfg, warp=TRYON_WARP_CKPT, texture=TRYON_TEXTURE_CKPT)
+        models = load_tryon_models(cfg, warp=TRYON_WARP_CKPT or cfg.evaluation.warp_checkpoint, texture=TRYON_TEXTURE_CKPT or cfg.evaluation.texture_checkpoint)
     if globals().get("pre") is None:
         pre = PreTreatment(cfg)
     up = files.upload()
@@ -628,7 +636,7 @@ code(r"""
 from src.evaluation.final_eval import read_test_log, run_final_evaluation
 final = None
 if RUN_FINAL_EVAL and not DRY_RUN:
-    models = load_tryon_models(cfg, warp=TRYON_WARP_CKPT, texture=TRYON_TEXTURE_CKPT)
+    models = load_tryon_models(cfg, warp=TRYON_WARP_CKPT or cfg.evaluation.warp_checkpoint, texture=TRYON_TEXTURE_CKPT or cfg.evaluation.texture_checkpoint)
     print("models:", models.info)
     if FINAL_SPLIT == "test":
         print("earlier test-split runs:", sum(e.get("event") == "start" for e in read_test_log(cfg)))
@@ -642,7 +650,35 @@ else:
     print("Skipped (RUN_FINAL_EVAL=False or DRY_RUN).")
 """)
 
-md("## 13. Experiments\n**Planned for Phase 8.** The roadmap is `docs/experiments.md`; each experiment is a config file plus a run on the validation split.")
+md(r"""
+## 13. Experiments (Phase 8)
+Each experiment is one config file in `configs/exp_*.yaml` that changes **one** thing, writes into its **own** experiment folder, and is judged on the **validation** split against the frozen baseline B0 (`docs/experiments.md`). B0's checkpoints are marked FROZEN in Section 5, so an experiment cannot overwrite them.
+
+Session recipe (for example Experiment B):
+1. Section 0: `CONFIG_FILE = "configs/exp_b_classweights.yaml"`, `FETCH_DFMM = True`, `RUN_WARP_TRAINING = True`, `WARP_MAX_STEPS = 10000` (same as B0), `RUN_FINAL_EVAL = True`, `FINAL_SPLIT = "val"`, `FINAL_PARTS = ["warp", "paired", "realism"]`.
+2. Run all. Training resumes if the session drops; the evaluation uses B0's texture network automatically (set in the config).
+3. This section compares the experiment with B0 on the same validation pairs and saves `comparison.md` next to the results.
+""")
+code(r"""
+COMPARE_WITH_BASELINE = True
+if COMPARE_WITH_BASELINE and not DRY_RUN and cfg.experiment.name != "baseline_128":
+    from src.evaluation.compare import compare_results, find_latest_results, format_comparison
+    import json as _json
+    try:
+        b0 = find_latest_results(paths.outputs, "baseline_128", "val")
+        ex = find_latest_results(paths.outputs, cfg.experiment.name, "val")
+    except FileNotFoundError as e:
+        print("Nothing to compare yet:", e)
+    else:
+        cmp = compare_results(_json.loads(b0.read_text()), _json.loads(ex.read_text()))
+        text = format_comparison(cmp, cfg.experiment.name)
+        (ex.parent / "comparison.md").write_text(text)
+        (ex.parent / "comparison.json").write_text(_json.dumps(cmp, indent=1, default=float))
+        print(text)
+        print("saved:", ex.parent / "comparison.md")
+else:
+    print("Skipped (baseline config, DRY_RUN, or COMPARE_WITH_BASELINE=False).")
+""")
 
 md("## 14. Saving and exporting\nWith `EXPORT_RESULTS=True` everything this session produced (training logs as CSV, evaluation metrics, grids, pair statistics) is copied to `<drive>/report_exports/<date-time>/`. Download that folder from Drive and put it in the project under `report/private/exports/`; no need to copy numbers by hand.")
 code(r"""
@@ -662,7 +698,7 @@ if EXPORT_RESULTS and not DRY_RUN:
         for g in (Path(e2e["grid"]).parent).glob("*.png"):
             shutil.copy(g, exp_dir / f"tryon_{g.name}")
     if globals().get("final"):
-        shutil.copytree(final["out_dir"], exp_dir / f"final_eval_{final['split']}", dirs_exist_ok=True)
+        shutil.copytree(final["out_dir"], exp_dir / f"{cfg.experiment.name}_final_eval_{final['split']}", dirs_exist_ok=True)
         from src.evaluation.final_eval import test_log_path
         if test_log_path(cfg).is_file():
             shutil.copy(test_log_path(cfg), exp_dir / "test_split_log.jsonl")

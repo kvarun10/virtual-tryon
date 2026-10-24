@@ -57,8 +57,8 @@ def main(argv=None) -> int:
     ap.add_argument("--config", default="configs/colab_pairfilter.yaml")
     ap.add_argument("--drive-root", default="outputs/local_drive",
                     help="folder with pretrained/ and checkpoints/ (Colab: /content/drive/MyDrive/VirtualTryOn)")
-    ap.add_argument("--warp", default="last", help="last | best | path to a warp checkpoint")
-    ap.add_argument("--texture", default="last", help="last | best | path to a texture checkpoint")
+    ap.add_argument("--warp", default=None, help="last | best | path (default: evaluation.warp_checkpoint of the config)")
+    ap.add_argument("--texture", default=None, help="last | best | path (default: evaluation.texture_checkpoint)")
     ap.add_argument("--device", default="auto", choices=["auto", "cpu", "cuda"])
     ap.add_argument("--allow-download", action="store_true", help="allow downloading missing SCHP weights")
     ap.add_argument("--dataset-keys", action="store_true",
@@ -73,7 +73,8 @@ def main(argv=None) -> int:
     cfg = load_config(a.config, overrides)
     refs, tgts = _images(a.reference), _images(a.target)
     print(f"loading models (warp={a.warp}, texture={a.texture}) ...", flush=True)
-    models = load_tryon_models(cfg, warp=a.warp, texture=a.texture)
+    models = load_tryon_models(cfg, warp=a.warp or cfg.evaluation.warp_checkpoint,
+                               texture=a.texture or cfg.evaluation.texture_checkpoint)
     print("  ", models.info, "| device", models.device, flush=True)
     pre = PreTreatment(cfg)
     rows = []

@@ -14,6 +14,19 @@ and that run is logged like the first one (`docs/final_evaluation.md`).
 image size, model widths, optimiser settings, number of steps, seed, metric definitions (warp metric v2, texture
 metric v3, Phase 7 region and LPIPS masking).
 
+**The baseline cannot be changed by an experiment (added 2026-10-24).**
+* Code: git tag `baseline-v1` (commit 312eb4a) is exactly the code of the official evaluation and the demo. New
+  experiment options default to B0's behaviour (`warp_class_weights: none`, `texture_real_pair_prob: 0`), and
+  `tests/test_experiments.py` checks that the B0 config is unchanged.
+* Weights: notebook Section 5 marks `checkpoints/baseline_128/warp_pf` and `texture_pf` as FROZEN. Training into a
+  frozen folder, saving or pruning there raises `FrozenRunError` before anything is written; loading still works.
+* Folders: every experiment has its own `experiment.name`, so its checkpoints, logs and outputs live in
+  `<drive>/{checkpoints,logs,outputs}/<experiment name>/`, never in `baseline_128/`.
+* An experiment that trains one stage is evaluated with the **frozen B0 network of the other stage**
+  (`evaluation.warp_checkpoint` / `texture_checkpoint` in its config), so a change can only come from the trained stage.
+* Comparison: notebook Section 13 / `python -m src.evaluation.compare` writes `comparison.md` (experiment vs B0 on the
+  same validation pairs, 95 % bootstrap intervals). The test split stays locked.
+
 **How each experiment is run:** a config file `configs/exp_<letter>_<name>.yaml` with `_base_: colab_pairfilter.yaml` and
 its own `training.warp_run_name` / `texture_run_name`, so B0's checkpoints are never overwritten. Evaluation is notebook
 Section 12 with `FINAL_SPLIT="val"`, `FINAL_LIMIT=None`.
@@ -33,16 +46,17 @@ be ruled out. Where an adopted change is borderline, a second seed is run before
 0.576 (session B), so **warp errors cost about 0.13 SSIM**: more than anything measured on the texture side. The warp
 experiments therefore come first.
 
-| ID | Experiment | Problem | Stage | Priority | Est. T4 cost |
-|---|---|---|---|---|---|
-| A | DensePose body maps instead of SCHP-Pascal | P12, P19 | warp | 1 | DFMM DensePose download (~5.6 GB, once) + ~45 min |
-| B | Class-weighted cross-entropy | P19 | warp | 2 | ~45 min |
-| C | More real pose-change pairs for texture | P27(a) | texture | 3 | ~80 min |
-| D | Discriminator strength for texture | P22, P27(b) | texture | 4 | ~80 min per setting |
-| E | 256 px resolution | P27(c) | both | 5 | ~3-4 h (several sessions) |
-| F | Exemplar-parsing ablation | D18 | texture | 6 | ~80 min |
-| G | Merge top/outer in parser output | P11 | Stage A | 7 | ~15 min (no training) |
-| H | Garment-only references (product photos) | P04 | all | 8 (outside DFMM) | new dataset + full retraining |
+| ID | Experiment | Problem | Stage | Priority | Est. T4 cost | Status (2026-10-24) |
+|---|---|---|---|---|---|---|
+| A | DensePose body maps instead of SCHP-Pascal | P12, P19 | warp | 1 | DFMM DensePose download (~5.6 GB, once) + ~45 min | needs download approval; inference caveat (see A) |
+| B | Class-weighted cross-entropy | P19 | warp | 2 | ~45 min + ~10 min eval | **ready**: `configs/exp_b_classweights.yaml` |
+| C | More real pose-change pairs for texture | P27(a) | texture | 3 | ~80 min + ~10 min eval | **ready**: `configs/exp_c_realpairs.yaml` |
+| D | Discriminator strength for texture | P22, P27(b) | texture | 4 | ~80 min per setting | planned |
+| E | 256 px resolution | P27(c) | both | 5 | probe ~15 min; full run many hours (see E) | planned; probe first |
+| F | Exemplar-parsing ablation | D18 | texture | 6 | ~80 min | planned |
+| G | Merge top/outer in parser output | P11 | Stage A | 7 | ~15 min (no training) | planned |
+| H | Garment-only references (product photos) | P04 | all | 8 (outside DFMM) | new dataset + full retraining | needs dataset licence |
+| I | DeepFashion In-shop (official release) | P27(a), comparability | texture, evaluation | after B/C | download + pseudo-labels | request by email (user) |
 
 ---
 
@@ -73,7 +87,9 @@ experiments therefore come first.
 * **Hypothesis:** weighting CE by inverse class frequency (median-frequency balancing over the training targets) raises
   rare-class IoU without lowering common classes by more than 0.02.
 * **Baseline:** B0 warp.
-* **Changed variable:** CE class weights (new option `training.warp_class_weights: none | median_freq`).
+* **Changed variable:** CE class weights, `training.warp_class_weights: sqrt_median_freq` (square root of median-frequency
+  balancing, clipped to [0.2, 5]; the plain version would give the background almost no weight). Weights come from
+  pixel counts of the training targets, cached in `<drive>/cache/class_counts/`. Validation CE stays unweighted.
 * **Fixed variables:** everything else.
 * **Dataset / split:** DFMM train for frequencies; validation for scoring.
 * **Metrics:** per-class IoU, mIoU, swap area agreement.
@@ -87,8 +103,9 @@ experiments therefore come first.
 * **Hypothesis:** with the filter only 2,514 of 10,160 training targets have a real partner, so most texture steps are
   easy pseudo pairs. Sampling targets *with* a partner more often raises SSIM / lowers LPIPS on real pairs.
 * **Baseline:** B0 texture (and B0 warp for end-to-end).
-* **Changed variable:** training sampler that draws targets with a real partner with probability 0.8 (new option;
-  currently about 20 %: a quarter of the targets have a partner, and a partner is used with probability 0.8).
+* **Changed variable:** `training.texture_real_pair_prob: 0.8`: a training draw is replaced, with probability 0.8, by a
+  target that has a real partner and is used as a real pair (B0: about 20 % real pairs, because a quarter of the
+  targets have a partner and a partner is used with probability 0.8; with the option about 84 %).
 * **Fixed variables:** pair filter (ΔE ≤ 15), steps (13k), losses and weights.
 * **Dataset / split:** DFMM; the 260 real validation pairs.
 * **Metrics:** T4 SSIM / L1 / LPIPS (gt_layout), end-to-end SSIM / LPIPS; FID/KID of different-item try-ons on val.
@@ -121,7 +138,12 @@ experiments therefore come first.
   downscaled to 128 px so both are compared at the same size.
 * **Changed variable:** `data.image_size=[256,256]` and the resolution-dependent sizes the config ties to it.
 * **Fixed variables:** data, filter, losses; steps scaled to the same number of epochs.
-* **Compute:** largest experiment, ~3-4 h of T4 time over several resumed sessions (resume is exact).
+* **Feasibility (not yet measured):** 256 px has 4x more pixels. The texture correlation memory grows with the 4th
+  power of `texture_corr_size` (32 at 128 px; CoCosNet uses 64), i.e. 16x more per sample at 64. A T4 (16 GB) will
+  probably need batch 2-4 with gradient accumulation, and steps several times slower, so a 13k-step texture run could
+  take many hours over several resumed sessions (resume is exact).
+* **Compute:** first a **probe** (~15 min): 50 steps of each stage at 256 px to measure time per step and peak memory;
+  the cost of the full run is reported to the user before it starts.
 * **Results to record:** time per step, peak memory, validation table at both sizes.
 * **Decision:** adopt if the 128 px-downscaled comparison wins per the common rule; otherwise report it as a cost/quality
   trade-off. Run only after A-D, so it starts from the best 128 px settings.
@@ -168,6 +190,28 @@ experiments therefore come first.
 * **Compute:** new dataset download (size reported before any download), full retraining of both stages (several
   sessions).
 * **Decision:** a separate project phase. It starts only after the licence is granted and the user approves the download.
+
+## I. DeepFashion In-shop (official release)
+
+* **What it adds over the data we already use:** DeepFashion-MultiModal (DFMM) is itself built from In-shop photos
+  (file names carry In-shop item IDs, `paper_analysis.md` §6 and §10.2). In-shop has ~52.7k images vs DFMM's 44.1k, and
+  only 12,701 DFMM images have manual parsing. The official release adds (a) the remaining images, many of them
+  close-ups or partial views; (b) the official item-level train/test lists; and (c) access to the **standard
+  pose-transfer test pairs** used by ADGAN, DiOr and the paper's Table 1 (to verify on arrival).
+* **Research questions:** (1) does more real pose-change data improve the texture stage (P27a)? (2) can we report
+  pose-transfer SSIM/LPIPS/FID on the standard test pairs, the closest we can get to the paper's Table 1 setting?
+* **Hypotheses:** (1) a small gain at most: the new images have no manual parsing, so their layouts would come from
+  SCHP-LIP (0.62 mIoU vs manual labels on our test split), i.e. noisy targets, and the warp stage (our largest error)
+  needs exact layouts. (2) Comparability improves: same test pairs as published baselines, though the paper's own
+  protocol details stay unknown.
+* **Baseline:** B0. **Changed variable:** extra texture training pairs from In-shop with SCHP pseudo-layouts.
+* **Fixed variables:** model, losses, pair filter, steps; the warp stays trained on manual labels only.
+* **Metrics:** Exp C metrics on our validation pairs; separately, pose-transfer metrics on the standard test pairs.
+* **Cost:** access needs a signed agreement emailed to the dataset authors (the user does this); download size is
+  reported before downloading; SCHP over the new images ~30-40 min on a T4 (estimated from the body-map precompute:
+  12.7k images in 31 min).
+* **Decision:** worth requesting (it only costs the request), but not expected to fix the main weakness (the warp).
+  Run it after B and C, and only if C shows that more real pairs help.
 
 ---
 

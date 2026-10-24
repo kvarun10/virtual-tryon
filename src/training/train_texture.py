@@ -82,7 +82,8 @@ class TextureTrainer(GANTrainer):
 
     def describe_run(self, per_epoch: int, total: int) -> str:
         return (f"training texture: {len(self.train_ds)} targets ({self.train_ds.n_cross_view_available()} with a same-item "
-                f"exemplar), {per_epoch} steps/epoch, target {total} steps, device {self.device}, amp {self.use_amp}")
+                f"exemplar), {per_epoch} steps/epoch, target {total} steps, device {self.device}, amp {self.use_amp}"
+                + (f", real-pair sampling p={self.train_ds.p_real}" if self.train_ds.p_real else ""))
 
     def adv_active(self) -> bool:
         return self.t.lambda_tex_adv > 0 and self.step >= self.t.texture_adv_start_step
