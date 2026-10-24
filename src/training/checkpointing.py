@@ -25,6 +25,37 @@ class CheckpointMismatchError(RuntimeError):
     pass
 
 
+FROZEN_MARKER = "FROZEN"
+
+
+class FrozenRunError(PermissionError):
+    """A checkpoint folder marked FROZEN (e.g. the baseline shown in the report) must never be written to."""
+
+
+def freeze_run(directory: Path, note: str = "") -> Path:
+    """Mark a run folder read-only for this project: training, saving and pruning into it are refused.
+    The checkpoints stay loadable for evaluation and try-on. Delete the FROZEN file by hand to undo."""
+    d = Path(directory)
+    if not (d / "last.pt").is_file():
+        raise FileNotFoundError(f"Nothing to freeze: no last.pt in {d}")
+    marker = d / FROZEN_MARKER
+    if not marker.is_file():
+        marker.write_text((note or "frozen baseline: do not train into this folder") + chr(10), encoding="utf-8")
+    return marker
+
+
+def is_frozen(directory: Path) -> bool:
+    return (Path(directory) / FROZEN_MARKER).is_file()
+
+
+def ensure_not_frozen(directory: Path) -> None:
+    if is_frozen(directory):
+        raise FrozenRunError(
+            f"{directory} is a FROZEN baseline ({(Path(directory) / FROZEN_MARKER).read_text(encoding='utf-8').strip()}). "
+            "Experiments must use their own run/experiment name (see docs/experiments.md); nothing was written."
+        )
+
+
 def rng_state() -> Dict:
     np_state = np.random.get_state()
     return {
@@ -75,6 +106,7 @@ class CheckpointManager:
         return self.dir / "best.pt"
 
     def save(self, state: Dict, step: int, is_best: bool = False, snapshot: bool = True) -> Path:
+        ensure_not_frozen(self.dir)
         atomic_save(state, self.last)
         if is_best:
             atomic_save(state, self.best)
@@ -127,6 +159,8 @@ def prune_snapshots(run_dir: Path, dry_run: bool = False) -> Dict:
     ``last.pt`` and ``best.pt`` are always kept. Returns what was (or would be) removed.
     """
     run_dir = Path(run_dir)
+    if is_frozen(run_dir):
+        return {"run": run_dir.name, "removed": [], "freed_MiB": 0.0, "dry_run": dry_run, "skipped": "frozen"}
     last = run_dir / "last.pt"
     info = verify_checkpoint(last)  # raises if last.pt is missing or unreadable -> nothing is deleted
     snaps = sorted(run_dir.glob("step_*.pt"))

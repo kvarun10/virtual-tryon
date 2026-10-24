@@ -1,0 +1,16 @@
+# Experiment C (docs/experiments.md): show the texture network more REAL pose-change pairs.
+# ONE change vs the frozen baseline B0: training.texture_real_pair_prob = 0.8 (B0: 0, i.e. ~20% real pairs).
+# Everything is written under experiment folder exp_c_realpairs; B0 (baseline_128/warp_pf, texture_pf) is never touched.
+# Evaluation pairs the new texture network with B0's warp, so any change comes from the texture stage.
+_base_: colab_pairfilter.yaml
+
+experiment:
+  name: exp_c_realpairs
+
+training:
+  texture_real_pair_prob: 0.8
+  texture_run_name: texture
+  warp_run_name: warp_unused            # this experiment does not train the warp stage
+
+evaluation:
+  warp_checkpoint: "{checkpoints_dir}/baseline_128/warp_pf/last.pt"         # frozen B0 warp

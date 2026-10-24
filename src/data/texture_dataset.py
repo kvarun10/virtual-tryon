@@ -54,6 +54,10 @@ class TextureDataset(Dataset):
         self.siblings = {i: [j for j in by_item[r.item_id] if j != i and pf.ok(r.name, self.records[j].name)] if r.item_id else []
                          for i, r in enumerate(self.records)}
         self.seed, self.epoch = cfg.experiment.seed, 0
+        # Experiment C: with probability p_real a training draw is replaced by a target that HAS a real partner
+        # (always used as a real cross-view pair). 0 = baseline sampling, bit-identical to before.
+        self.p_real = cfg.training.texture_real_pair_prob if train else 0.0
+        self.partnered = [i for i, s in self.siblings.items() if s]
 
     def set_epoch(self, epoch: int) -> None:
         self.epoch = epoch
@@ -87,6 +91,11 @@ class TextureDataset(Dataset):
 
     def __getitem__(self, i: int) -> Dict:
         rng = np.random.default_rng([self.seed, self.epoch if self.train else 10_000, i])
+        if self.p_real > 0 and self.partnered and rng.random() < self.p_real:
+            i = int(self.partnered[rng.integers(0, len(self.partnered))])
+            sib = self.siblings[i]
+            j = int(sib[rng.integers(0, len(sib))])
+            return self.pair(i, j, rng)
         sib = self.siblings[i]
         use_cross = bool(sib) and rng.random() < self.p_cross
         j = int(sib[rng.integers(0, len(sib))]) if use_cross else None

@@ -165,6 +165,8 @@ class TrainingConfig:  # warp fields used from Phase 4; texture fields reserved 
     warp_gan_mode: str = "lsgan"  # lsgan | hinge | vanilla  (paper Eq. 3 form is ambiguous)
     warp_adv_start_step: int = 500  # train with CE only before this step
     warp_real_smoothing: float = 0.1  # label smoothing of real maps shown to D
+    warp_class_weights: str = "none"  # none | median_freq | sqrt_median_freq (Experiment B; baseline: none)
+    texture_real_pair_prob: float = 0.0  # Experiment C: P(draw a target that has a real partner); 0 = baseline sampling
     warp_swap_samples: int = 64  # swap-diagnostic pairs evaluated at each validation
     val_max_batches: Optional[int] = 50
     # --- texture stage (Phase 5); lr_generator / lr_discriminator / betas above are the paper's ---
@@ -216,6 +218,10 @@ class EvaluationConfig:  # Phase 7 final evaluation (docs/final_evaluation.md)
     kid_subsets: int = 100
     kid_subset_size: int = 500
     timing_runs: int = 20  # single-image runs after warm-up
+    # Checkpoints used by evaluation / try-on: last | best | path ({checkpoints_dir} allowed). Experiments that train
+    # only one stage point the other stage at the frozen baseline here.
+    warp_checkpoint: str = "last"
+    texture_checkpoint: str = "last"
     test_log: str = ""  # audit log of test-split runs; "" -> <paths.cache_dir>/test_split_log.jsonl
 
 
@@ -347,6 +353,8 @@ def _resolve_placeholders(cfg: ProjectConfig) -> None:
         setattr(cfg.data, attr, fmt(getattr(cfg.data, attr)))
     for attr in ("body_maps_local", "body_maps_archive"):
         setattr(cfg.segmentation, attr, fmt(getattr(cfg.segmentation, attr)))
+    for attr in ("warp_checkpoint", "texture_checkpoint", "metric_weights_dir", "test_log"):
+        setattr(cfg.evaluation, attr, fmt(getattr(cfg.evaluation, attr)))
 
 
 def validate_config(cfg: ProjectConfig) -> None:
@@ -396,6 +404,10 @@ def validate_config(cfg: ProjectConfig) -> None:
         raise ConfigError("model.warp_skip must be body|dual|none and model.warp_norm instance|batch|none")
     if t.texture_vgg_init not in {"imagenet", "random"} or m.texture_norm not in {"positional", "instance"}:
         raise ConfigError("training.texture_vgg_init must be imagenet|random; model.texture_norm positional|instance")
+    if t.warp_class_weights not in {"none", "median_freq", "sqrt_median_freq"}:
+        raise ConfigError("training.warp_class_weights must be none | median_freq | sqrt_median_freq")
+    if not 0.0 <= t.texture_real_pair_prob <= 1.0:
+        raise ConfigError("training.texture_real_pair_prob must be in [0, 1]")
     if not 0.0 <= t.texture_cross_view_prob <= 1.0:
         raise ConfigError("training.texture_cross_view_prob must be in [0, 1]")
     if not 0.0 <= t.warp_cross_view_prob <= 1.0:

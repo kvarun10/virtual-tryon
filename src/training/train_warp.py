@@ -55,6 +55,43 @@ def class_area_agreement(input_cloth: np.ndarray, pred: np.ndarray, transfer_ids
     return float(np.minimum(a_in / a_in.sum(), a_pr / a_pr.sum()).sum())
 
 
+def class_weights_from_counts(counts: np.ndarray, mode: str, clip=(0.2, 5.0)) -> np.ndarray:
+    """CE class weights from pixel counts (Experiment B). Classes with no pixels get weight 0 (they never occur).
+
+    median_freq: w_c = median(f) / f_c (Eigen & Fergus 2015). sqrt_median_freq: the square root of that, a milder
+    version that does not almost switch off the background. Both are clipped to ``clip``.
+    """
+    counts = np.asarray(counts, np.float64)
+    present = counts > 0
+    freq = counts / counts.sum()
+    w = np.zeros_like(freq)
+    w[present] = np.median(freq[present]) / freq[present]
+    if mode == "sqrt_median_freq":
+        w[present] = np.sqrt(w[present])
+    elif mode != "median_freq":
+        raise ValueError(f"unknown class-weight mode {mode}")
+    w[present] = np.clip(w[present], *clip)
+    return w
+
+
+def train_class_counts(ds, cache_dir: Path) -> np.ndarray:
+    """Supervised pixel count per garment class over the training targets (at model size), cached as JSON."""
+    import hashlib
+
+    key = hashlib.sha1(("|".join(r.name for r in ds.records) + str(ds.size) + ds.G.name).encode()).hexdigest()[:12]
+    path = Path(cache_dir) / "class_counts" / f"warp_train_{key}.json"
+    if path.is_file():
+        return np.array(json.loads(path.read_text(encoding="utf-8"))["counts"], np.float64)
+    counts = np.zeros(ds.G.num_classes, np.float64)
+    for rec in ds.records:
+        lab = ds._garment(rec).astype(np.int64)
+        lab = lab[~np.isin(lab, ds.ignore_ids)]
+        counts += np.bincount(lab.ravel(), minlength=ds.G.num_classes)[: ds.G.num_classes]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"counts": counts.tolist(), "classes": ds.G.names, "n_images": len(ds.records)}), encoding="utf-8")
+    return counts
+
+
 METRIC_VERSION = 2  # v2: mIoU over trained classes only; untrained classes masked out of predictions
 
 
@@ -93,6 +130,14 @@ class WarpTrainer(GANTrainer):
         # mIoU = mean over the trained classes only (transfer classes + skin). Including untrained classes
         # added spurious IoU-0 entries whenever a stray pixel was predicted as one of them (metric v1 bug).
         self.miou_exclude = [0] + self.untrained_ids
+        # Experiment B: class-weighted CE for training only (validation CE stays unweighted, so it is comparable)
+        self.ce_weight = None
+        if self.t.warp_class_weights != "none":
+            counts = train_class_counts(self.train_ds, Path(cfg.paths.cache_dir))
+            w = class_weights_from_counts(counts, self.t.warp_class_weights)
+            self.ce_weight = torch.tensor(w, dtype=torch.float32, device=self.device)
+            self.signature["class_weights"] = self.t.warp_class_weights
+            self._print("CE class weights: " + " ".join(f"{n} {v:.2f}" for n, v in zip(self.G_labels.names, w) if v > 0))
 
     def describe_run(self, per_epoch: int, total: int) -> str:
         return (f"training warp: {len(self.train_ds)} triplets ({self.train_ds.n_cross_view_available()} with a "
@@ -110,7 +155,7 @@ class WarpTrainer(GANTrainer):
         self.set_disc_grad(False)
         with self.autocast():
             logits = self.gen(cloth, body)
-            ce = segmentation_ce(logits, target)
+            ce = segmentation_ce(logits, target, weight=self.ce_weight)
             g_adv = torch.zeros((), device=self.device)
             if adv:
                 fake = masked_probs(logits, target)

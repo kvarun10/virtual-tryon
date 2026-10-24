@@ -1,0 +1,16 @@
+# Experiment B (docs/experiments.md): class-weighted cross-entropy for the warp.
+# ONE change vs the frozen baseline B0: training.warp_class_weights = sqrt_median_freq.
+# Everything is written under experiment folder exp_b_classweights; B0 (baseline_128/warp_pf, texture_pf) is never touched.
+# Evaluation pairs the new warp with B0's texture network, so any change comes from the warp.
+_base_: colab_pairfilter.yaml
+
+experiment:
+  name: exp_b_classweights
+
+training:
+  warp_class_weights: sqrt_median_freq
+  warp_run_name: warp
+  texture_run_name: texture_unused      # this experiment does not train the texture stage
+
+evaluation:
+  texture_checkpoint: "{checkpoints_dir}/baseline_128/texture_pf/last.pt"   # frozen B0 texture
