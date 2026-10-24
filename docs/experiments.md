@@ -49,8 +49,8 @@ experiments therefore come first.
 | ID | Experiment | Problem | Stage | Priority | Est. T4 cost | Status (2026-10-24) |
 |---|---|---|---|---|---|---|
 | A | DensePose body maps instead of SCHP-Pascal | P12, P19 | warp | 1 | DFMM DensePose download (~5.6 GB, once) + ~45 min | needs download approval; inference caveat (see A) |
-| B | Class-weighted cross-entropy | P19 | warp | 2 | ~45 min + ~10 min eval | **ready**: `configs/exp_b_classweights.yaml` |
-| C | More real pose-change pairs for texture | P27(a) | texture | 3 | ~80 min + ~10 min eval | **ready**: `configs/exp_c_realpairs.yaml` |
+| B | Class-weighted cross-entropy | P19 | warp | 2 | ~45 min + ~10 min eval | **done 10-24: rejected** |
+| C | More real pose-change pairs for texture | P27(a) | texture | 3 | ~80 min + ~10 min eval | **done 10-24: mixed, not adopted yet** |
 | D | Discriminator strength for texture | P22, P27(b) | texture | 4 | ~80 min per setting | planned |
 | E | 256 px resolution | P27(c) | both | 5 | probe ~15 min; full run many hours (see E) | planned; probe first |
 | F | Exemplar-parsing ablation | D18 | texture | 6 | ~80 min | planned |
@@ -212,8 +212,44 @@ experiments therefore come first.
   12.7k images in 31 min).
 * **Decision:** worth requesting (it only costs the request), but not expected to fix the main weakness (the warp).
   Run it after B and C, and only if C shows that more real pairs help.
+* **Update 2026-10-24 (access granted; README read, nothing downloaded yet):** the release contains `Img/img.zip`
+  (52,712 images resized to 256 × 256, 792 MB), `Img/img_highres.zip` (7.7 GB), `Anno/` (bbox with a *pose type*
+  per image: frontal / side / back / zoom-out / zoom-in / stand-alone; landmarks; items; descriptions; attributes;
+  `segmentation/` COCO-style clothing masks from mmfashion; `densepose/img_iuv.zip`) and `Eval/list_eval_partition.txt`
+  (retrieval split train / query / gallery). **Correction:** it does *not* contain the standard pose-transfer test
+  pairs; those lists were published separately by later pose-transfer papers, so hypothesis (2) needs those lists.
+  The clothing masks may give better-than-SCHP layouts for some new images (coverage to be measured).
+  Next step: `scripts/inspect_inshop.py` on the text annotations only (no image download) to count new person
+  images, new same-item pairs, and the photos of our validation/test items that must be excluded.
+* **After Experiment C (2026-10-24):** more real pairs improved paired fidelity only slightly (T4 SSIM +0.007,
+  LPIPS −0.003) and made realism worse (FID +2.1). Extra In-shop pairs alone are therefore unlikely to give a large
+  gain; their value is mainly more *diverse* items (see C's analysis).
 
 ---
+
+## Analysis of B and C (2026-10-24)
+
+**B (class-weighted CE): rejected.** Hypothesis not supported. Warp mIoU fell 0.715 → 0.685, and the classes it was
+meant to help did not improve: outer unchanged (0.587), skirt *dropped* 0.720 → 0.630; dress and footwear dropped too.
+End-to-end SSIM fell (−0.039, CI excludes 0) while L1/LPIPS improved slightly. That pattern fits garments drawn
+*larger*: up-weighted garment classes win border pixels from skin and background, so more of the scored region is
+garment-coloured (small colour error, lower L1/LPIPS) but the shapes are wrong (structure, SSIM, mIoU). A second
+effect: from step ~6,900 the warp discriminator collapsed (d ≈ 0.0001, P31), which did not happen in the baseline
+run, so part of the loss may come from unstable adversarial training rather than the weights themselves. Not pursued
+further: the decision rule fails clearly, and the weak classes need better *shape* information (Experiment A), not
+a louder loss.
+
+**C (more real pairs): mixed, not adopted as the new baseline.** The paired metrics improved in all three
+measures with the true layout and end-to-end (CIs exclude 0), so the hypothesis "texture is limited by real pairs"
+is supported, but the gain is small (+0.007 SSIM, −0.003 LPIPS ≈ 5 % of LPIPS). Realism of *different-item* try-ons
+got worse (FID +2.06, KID 0.0074 → 0.0103, about 5x B0's KID std). Likely reason: 84 % of draws now come from the
+same 2,514 partnered targets (each seen ~4x as often), so the generator fits that subset and same-outfit pairs and
+generalises less to new garment/person combinations, the situation of a real try-on. Common rule 2 ("no secondary
+metric clearly worse") fails, so C stays an experiment. Follow-ups: a middle setting (p = 0.4) or the best checkpoint
+(step 10k) would test the trade-off; more *diverse* real pairs (In-shop, Experiment I) address the cause directly.
+
+What this means for the plan: the warp remains the main error source (T4 − T5 ≈ 0.13 SSIM). Next candidates in order:
+A (DensePose body maps, the shape information the warp lacks), G (parser post-processing, no training), then I.
 
 ## Results log
 
@@ -223,3 +259,5 @@ One row per finished run, filled from its `results.json` by code. The paired-dif
 | Exp | Run name | Date | Primary metric (val) | Δ vs B0 [95 % CI] | Secondary | Decision |
 |---|---|---|---|---|---|---|
 | B0 | warp_pf / texture_pf | 2026-10-22 | warp mIoU 0.715; T5 SSIM 0.442 / LPIPS 0.075; T4 LPIPS 0.050 | – | swap area 0.879; T6 SSIM 0.438; FID 23.67 | baseline (`report/data/final_eval_val_20261022.md`) |
+| B | exp_b_classweights / warp | 2026-10-24 | warp mIoU 0.685 | −0.030 (skirt −0.089, footwear −0.063, dress −0.039; outer ±0) | T5 SSIM −0.039 [−0.046, −0.031]; T5 LPIPS −0.004 [−0.006, −0.003]; FID +1.6 | **rejected** (`report/data/exp_b_classweights_vs_B0_val.md`) |
+| C | exp_c_realpairs / texture | 2026-10-24 | T4 LPIPS 0.0471 | −0.0026 [−0.0037, −0.0014] | T4 SSIM +0.007; T5 SSIM +0.006, LPIPS −0.003; T6 SSIM +0.002 (n.s.); FID +2.06, KID +0.0028 | **mixed: not adopted** (`report/data/exp_c_realpairs_vs_B0_val.md`) |

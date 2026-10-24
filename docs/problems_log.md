@@ -41,6 +41,8 @@ Evidence paths refer to `report/` (numbers, charts), `docs/`, and `tests/`. Date
 | P28 | 10-22 | Metrics | Risk of tuning on the test split; whole-image metrics flattered by background and pasted faces | fixed (protocol + guard) |
 | P29 | 10-22 | Usability | Own-photo try-on only ran inside the notebook after the full validation evaluation | fixed (`scripts/tryon.py`, standalone cell) |
 | P30 | 10-24 | Workflow | Experiments could overwrite the baseline shown to the supervisor | fixed (tag, FROZEN guard, own folders) |
+| P31 | 10-24 | Stage B | Class-weighted CE (Exp B) made the warp worse; warp discriminator collapsed late in that run | closed (rejected) |
+| P32 | 10-24 | Stage C | More real pairs (Exp C) improved paired scores but worsened FID/KID of different-item try-ons | open (trade-off) |
 
 ---
 
@@ -267,6 +269,25 @@ P19: outer is still the weakest class (0.548 IoU on test).
   `FrozenRunError`); each experiment in its own `experiment.name`; new options default to B0 behaviour; tests in
   `tests/test_experiments.py` (B0 config unchanged, guard blocks writes, file untouched).
 * **Status:** fixed.
+
+### P31 – Class weighting hurt the warp (Experiment B, 2026-10-24)
+* **Evidence:** val warp mIoU 0.715 → 0.685; skirt 0.720 → 0.630, footwear 0.633 → 0.571, outer unchanged;
+  end-to-end SSIM −0.039 (CI [−0.046, −0.031]) but L1/LPIPS slightly better; FID +1.6
+  (`report/data/exp_b_classweights_vs_B0_val.md`). From step ~6,900 the warp discriminator loss fell to ~0.0001 with
+  g_adv ≈ 0.50, i.e. the discriminator separated real and predicted maps perfectly (baseline run: d ≈ 0.07-0.12).
+* **Interpretation:** up-weighted garment classes take border pixels from skin/background (garments drawn too large);
+  the discriminator collapse may add to it. The weak classes lack shape information rather than loss weight.
+* **Action:** rejected; B0 unchanged (frozen). If a future warp run shows the same collapse, add a discriminator
+  safeguard (e.g. stop D updates when d < 0.01).
+* **Status:** closed.
+
+### P32 – Real-pair sampling: better fidelity, worse realism (Experiment C, 2026-10-24)
+* **Evidence:** T4 SSIM +0.007 / LPIPS −0.003, end-to-end SSIM +0.006 / LPIPS −0.003 (CIs exclude 0), but FID
+  23.67 → 25.73 and KID 0.0074 → 0.0103 for different-item try-ons (`report/data/exp_c_realpairs_vs_B0_val.md`).
+* **Interpretation:** 84 % of training draws come from the same 2,514 targets, so the generator specialises on
+  same-outfit pairs of that subset and generalises less to new garment/person combinations.
+* **Next:** p = 0.4, or more diverse real pairs (In-shop, Experiment I).
+* **Status:** open (trade-off; not adopted).
 
 ---
 
