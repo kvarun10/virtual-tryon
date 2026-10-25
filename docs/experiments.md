@@ -56,7 +56,7 @@ experiments therefore come first.
 | F | Exemplar-parsing ablation | D18 | texture | 6 | ~80 min | planned |
 | G | Merge top/outer in parser output | P11 | Stage A | 7 | ~15 min (no training) | planned |
 | H | Garment-only references (product photos) | P04 | all | 8 (outside DFMM) | new dataset + full retraining | needs dataset licence |
-| I | DeepFashion In-shop (official release) | P27(a), comparability | texture, evaluation | after B/C | download + pseudo-labels | request by email (user) |
+| I | DeepFashion In-shop (official release) | P27(a), comparability | texture, evaluation | after B/C | download + pseudo-labels | access granted; inspected 10-25: little new full-body data |
 
 ---
 
@@ -221,6 +221,22 @@ experiments therefore come first.
   The clothing masks may give better-than-SCHP layouts for some new images (coverage to be measured).
   Next step: `scripts/inspect_inshop.py` on the text annotations only (no image download) to count new person
   images, new same-item pairs, and the photos of our validation/test items that must be excluded.
+* **Inspection result (2026-10-25, text annotations only; `report/data/inshop_inspection_20261025.json`):**
+  * **All 44,096 DFMM images are In-shop images**; In-shop adds 8,616 photos.
+  * 9,609 In-shop photos belong to our 1,365 validation/test items and must never be used for training (leakage).
+  * The new photos (outside val/test items) are mostly not what our full-body pipeline needs: 2,429 zoom-in,
+    503 garment-only, 1,831 back, 1,704 side, and only **348 frontal + 160 zoom-out**. That is probably why DFMM
+    (built for full-body human images) left them out.
+  * Upper bound of new same-item pairs: 19,662 ordered pairs over 1,113 items, mostly side/back views of uncertain
+    framing, before the outfit filter (which kept 15.8 % of DFMM pairs).
+  * Clothing masks (`Anno/segmentation`): 13,739 images with the same garment categories as DFMM's manual parsing
+    (top, outer, dress, skirt, pants, leggings, footwear, headwear, ...). Only the train and query files contain
+    skin/face/hair; the gallery file does not. Whether these are DFMM's own annotations again or extra labelled
+    images is measured by the extended inspection (`overlap` per file).
+  * **Conclusion:** In-shop is not a "big change" for training. It adds few usable full-body photos and no new
+    manual layouts (pending the overlap check). It is still useful for its DensePose files (Experiment A) and for
+    item descriptions. Do not download `img.zip` / `img_highres.zip` for training unless the overlap check finds
+    >1,000 new manually labelled full-body images.
 * **After Experiment C (2026-10-24):** more real pairs improved paired fidelity only slightly (T4 SSIM +0.007,
   LPIPS −0.003) and made realism worse (FID +2.1). Extra In-shop pairs alone are therefore unlikely to give a large
   gain; their value is mainly more *diverse* items (see C's analysis).
