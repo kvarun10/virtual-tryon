@@ -1,0 +1,57 @@
+{
+ "_source": "scripts/inspect_inshop.py on the DeepFashion In-shop text annotations (Colab CPU, 2026-10-25), compared with all 44,096 DFMM image names and our item-disjoint splits; output pasted by the user. No images were downloaded.",
+ "inshop_images": 52712,
+ "inshop_items": 7982,
+ "partition": {
+  "train": 25882,
+  "gallery": 12612,
+  "query": 14218
+ },
+ "pose_types": {
+  "frontal": 12861,
+  "side": 10923,
+  "back": 10661,
+  "zoom-out": 6670,
+  "zoom-in": 10914,
+  "stand-alone": 683
+ },
+ "clothes_types": {
+  "upper": 33487,
+  "lower": 10494,
+  "full": 8731
+ },
+ "dfmm_reference": "all DFMM images",
+ "also_in_dfmm": 44096,
+ "also_in_our_labelled_splits": 12701,
+ "images_of_our_val_test_items_EXCLUDE": 9609,
+ "protected_items": 1365,
+ "new_images_by_pose": {
+  "side": 1704,
+  "back": 1831,
+  "zoom-in": 2429,
+  "stand-alone": 503,
+  "frontal": 348,
+  "zoom-out": 160
+ },
+ "new_person_images": 4043,
+ "new_items_with_2plus_person_images": 1113,
+ "new_same_item_pairs_upper_bound": 19662,
+ "partition_images_without_bbox": 0,
+ "segmentation_json": {
+  "DeepFashion_segmentation_gallery.json": {
+   "images": 3810,
+   "annotations": 11042,
+   "categories": {"top": 3339, "pants": 3123, "neckwear": 1871, "dress": 417, "bag": 38, "footwear": 631, "outer": 358, "leggings": 89, "skirt": 227, "headwear": 421, "eyeglass": 421, "belt": 107}
+  },
+  "DeepFashion_segmentation_query.json": {
+   "images": 3112,
+   "annotations": 17091,
+   "categories": {"top": 2771, "pants": 2575, "neckwear": 1508, "hair": 2572, "skin": 2846, "face": 2616, "dress": 307, "outer": 302, "bag": 23, "footwear": 513, "headwear": 354, "eyeglass": 354, "skirt": 192, "leggings": 75, "belt": 83}
+  },
+  "DeepFashion_segmentation_train.json": {
+   "images": 6817,
+   "annotations": 37468,
+   "categories": {"top": 5989, "pants": 5540, "footwear": 1112, "skin": 6264, "skirt": 437, "neckwear": 3453, "hair": 5747, "face": 5809, "dress": 755, "outer": 669, "belt": 218, "leggings": 151, "headwear": 622, "eyeglass": 622, "bag": 80}
+  }
+ }
+}

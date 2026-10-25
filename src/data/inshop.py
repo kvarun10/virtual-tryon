@@ -54,14 +54,54 @@ def item_number(item_id: str) -> str:
     return item_id.split("_")[-1]
 
 
-def segmentation_coverage(seg_dir: Path) -> Dict:
+def _seg_stem(file_name: str) -> Optional[str]:
+    """Map a segmentation JSON file name to a DFMM-style stem; None if the format is not recognised."""
+    f = file_name.replace("\\", "/")
+    parts = f.split("/")
+    try:
+        if len(parts) >= 4:
+            return inshop_to_dfmm_stem("/".join(parts[-4:]))
+    except ValueError:
+        pass
+    stem = Path(f).stem
+    return stem if stem.count("-") >= 3 else None
+
+
+def segmentation_coverage(seg_dir: Path, labelled: Optional[set] = None, dfmm_all: Optional[set] = None,
+                          protected: Optional[set] = None) -> Dict:
+    """Per JSON file: images, masks per category and, if name sets are given, how many images are NOT already
+    manually parsed in our DFMM data (i.e. would be new labelled training images) and not of a val/test item."""
     out = {}
     for f in sorted(Path(seg_dir).glob("*.json")):
         d = json.loads(f.read_text(encoding="utf-8"))
         cats = {c["id"]: c["name"] for c in d.get("categories", [])}
         per_cat = Counter(cats.get(a.get("category_id"), str(a.get("category_id"))) for a in d.get("annotations", []))
-        out[f.name] = {"images": len(d.get("images", [])), "annotations": len(d.get("annotations", [])),
-                       "categories": dict(per_cat)}
+        img_cats: Dict[int, set] = defaultdict(set)
+        for a in d.get("annotations", []):
+            img_cats[a.get("image_id")].add(cats.get(a.get("category_id")))
+        images = d.get("images", [])
+        info = {"images": len(images), "annotations": len(d.get("annotations", [])), "categories": dict(per_cat),
+                "example_file_names": [im.get("file_name") for im in images[:3]]}
+        if labelled is not None:
+            c = Counter()
+            for im in images:
+                stem = _seg_stem(str(im.get("file_name", "")))
+                if stem is None:
+                    c["name_not_recognised"] += 1
+                    continue
+                num = stem.split("-")[2].split("_")[-1] if stem.count("-") >= 3 else ""
+                if stem in labelled:
+                    c["already_manually_parsed_in_dfmm"] += 1
+                elif protected and num in protected:
+                    c["of_val_test_items_EXCLUDE"] += 1
+                else:
+                    c["new_labelled_candidates"] += 1
+                    if {"skin", "face", "hair"} & img_cats.get(im.get("id"), set()):
+                        c["new_with_skin_face_hair_labels"] += 1
+                    if dfmm_all is not None and stem in dfmm_all:
+                        c["new_but_image_in_dfmm"] += 1
+            info["overlap"] = dict(c)
+        out[f.name] = info
     return out
 
 
@@ -120,5 +160,5 @@ def inspect_inshop(partition_file: Path, bbox_file: Path, split_file: Path,
                  "still need the outfit filter (dE <= 15), so the usable pair count will be lower than the upper bound."),
     })
     if segmentation_dir is not None and Path(segmentation_dir).is_dir():
-        rep["segmentation_json"] = segmentation_coverage(Path(segmentation_dir))
+        rep["segmentation_json"] = segmentation_coverage(Path(segmentation_dir), set(labelled), dfmm_all, protected)
     return rep

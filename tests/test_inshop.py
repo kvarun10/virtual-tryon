@@ -28,8 +28,13 @@ def _fixture(tmp_path):
                                                         "test": ["WOMEN-Dresses-id_00000002-02_1_front"]}}))
     seg = tmp_path / "Anno" / "segmentation"; seg.mkdir()
     (seg / "DeepFashion_instances_train.json").write_text(json.dumps(
-        {"images": [{"id": 1}], "annotations": [{"category_id": 1}, {"category_id": 2}],
-         "categories": [{"id": 1, "name": "top"}, {"id": 2, "name": "trousers"}]}))
+        {"images": [{"id": 1, "file_name": "img/MEN/Denim/id_00000080/01_1_front.jpg"},
+                    {"id": 2, "file_name": "WOMEN/Tees_Tanks/id_00000500/01_1_front.jpg"},
+                    {"id": 3, "file_name": "img/WOMEN/Dresses/id_00000002/02_7_additional.jpg"},
+                    {"id": 4, "file_name": "weird.jpg"}],
+         "annotations": [{"category_id": 1, "image_id": 1}, {"category_id": 2, "image_id": 2},
+                         {"category_id": 3, "image_id": 2}],
+         "categories": [{"id": 1, "name": "top"}, {"id": 2, "name": "trousers"}, {"id": 3, "name": "skin"}]}))
     dfmm = ["MEN-Denim-id_00000080-01_1_front", "MEN-Denim-id_00000080-01_2_side", "WOMEN-Dresses-id_00000002-02_1_front"]
     return split, dfmm
 
@@ -48,7 +53,11 @@ def test_inspect_counts_and_leakage(tmp_path):
     assert r["new_person_images"] == 3  # 2 of item 500 (front, back) + 1 of item 600; flat lay excluded
     assert r["new_items_with_2plus_person_images"] == 1 and r["new_same_item_pairs_upper_bound"] == 2
     assert r["new_images_by_pose"]["stand-alone"] == 1
-    assert r["segmentation_json"]["DeepFashion_instances_train.json"]["categories"] == {"top": 1, "trousers": 1}
+    seg = r["segmentation_json"]["DeepFashion_instances_train.json"]
+    assert seg["categories"] == {"top": 1, "trousers": 1, "skin": 1}
+    assert seg["overlap"] == {"already_manually_parsed_in_dfmm": 1, "new_labelled_candidates": 1,
+                              "new_with_skin_face_hair_labels": 1, "of_val_test_items_EXCLUDE": 1,
+                              "name_not_recognised": 1}
     out = tmp_path / "rep.json"
     assert main(["--inshop", str(tmp_path), "--split-file", str(split), "--out", str(out)]) == 0
     assert json.loads(out.read_text())["dfmm_reference"].startswith("only our")
