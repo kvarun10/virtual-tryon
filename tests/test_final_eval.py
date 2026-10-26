@@ -32,7 +32,7 @@ def test_full_run_writes_results_and_audit_log(trained, tmp_path):
     w, p, t = res["warp"], res["paired"], res["timing"]
     assert 0 <= w["mean_iou_7"] <= 1 and w["n_images"] == 4
     for v in ("gt_layout", "e2e_raw", "e2e", "auto_raw", "auto", "copy"):
-        for m in ("ssim", "l1", "lpips"):
+        for m in ("ssim", "l1", "lpips", "ssim_person", "ssim_whole", "l1_whole", "lpips_whole"):
             assert np.isfinite(p[f"{v}_{m}"]), (v, m)
     assert p["copy_lpips"] >= 0 and np.isfinite(res["realism"]["fid"]) and np.isfinite(res["noise_floor"]["kid"])
     assert t["total_ms"] >= t["warp_ms"] > 0 and t["runs"] == 4
@@ -67,3 +67,18 @@ def test_paired_bootstrap_ci():
     assert same["ci_low"] < 0 < same["ci_high"]
     with pytest.raises(ValueError):
         paired_bootstrap_ci([1.0], [2.0])
+
+
+def test_whole_image_region_equals_plain_ssim():
+    import torch
+
+    from src.evaluation.end_to_end import _region_metrics
+    from src.evaluation.metrics import ssim
+
+    rng = np.random.default_rng(0)
+    a = rng.integers(0, 255, (32, 32, 3), dtype=np.uint8)
+    b = np.clip(a.astype(int) + rng.integers(-40, 40, a.shape), 0, 255).astype(np.uint8)
+    whole = _region_metrics(a, b, np.ones((32, 32), bool))
+    ta, tb = (torch.from_numpy(x).permute(2, 0, 1)[None].float() / 255 for x in (a, b))
+    assert abs(whole["ssim"] - float(ssim(ta, tb)[0])) < 1e-6
+    assert abs(whole["l1"] - float((ta - tb).abs().mean())) < 1e-6

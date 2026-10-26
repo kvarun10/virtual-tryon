@@ -25,7 +25,7 @@ VARIANTS = [("gt_layout", "T4 texture with true layout"), ("e2e_raw", "T5 end-to
 
 
 def _verdict(metric: str, ci: Dict) -> str:
-    better_sign = -1 if metric in LOWER_IS_BETTER else 1
+    better_sign = -1 if metric.split("_")[0] in LOWER_IS_BETTER else 1
     if ci["ci_low"] > 0 or ci["ci_high"] < 0:
         return "better" if np.sign(ci["mean_diff"]) == better_sign else "worse"
     return "no clear change"
@@ -44,7 +44,7 @@ def compare_results(base: Dict, run: Dict) -> Dict:
         if len(common) >= 2:
             bi, ri = [c[0] for c in common], [c[1] for c in common]
             for v, label in VARIANTS:
-                for m in ("ssim", "l1", "lpips"):
+                for m in [f"{x}{r}" for r in ("", "_person", "_whole") for x in ("ssim", "l1", "lpips")]:
                     if m in bp.get(v, {}) and m in rp.get(v, {}):
                         a = np.asarray(bp[v][m])[bi]
                         b = np.asarray(rp[v][m])[ri]

@@ -27,18 +27,44 @@ reasons are listed in section 3. Within our own fixed protocol the system behave
 | Identity | face/hair labels from the target | same, plus target face/hair pixels pasted (D23) | keeps the target's face |
 | Evaluation | pose transfer and label-to-image tables, protocol not given; garment transfer qualitative only | try-on on held-out test pairs, fixed protocol (`final_evaluation.md`) | different tasks and protocols |
 
+## 2b. What the paper states about its evaluation (re-read 2026-10-26, Sec. 5.1-5.2, pp. 23165-23170)
+
+Stated:
+* Data: DeepFashion In-shop ("52,712 training images"); training at 256 × 256; "at least 4 P40 GPUs".
+* Quantitative evaluation uses **pose transfer** because it is "the only one that has reference images available"
+  (Sec. 5.2.2), i.e. a generated image is compared with a real photo of the same clothes in the target pose.
+* Metrics: SSIM, FID, and LPIPS described as measuring "generation diversity" (marked ↑).
+* Baselines ADGAN, DiOr and Ivan et al. were run with their public code and models "on the DeepFashion dataset".
+* Label-to-image (Table 2) uses mIoU, pixel accuracy and FID, compared with pix2pixHD, SPADE and SMIS.
+
+Not stated: the test pairs or split and their number; the evaluation resolution and crop; whole image or a region;
+SSIM settings; FID sample size; which inputs Dress-up receives for pose transfer (predicted layout from the warp
+stage, or a ground-truth layout); how mIoU/Acc in Table 2 were computed.
+
+**Correction of an earlier statement in our discussion:** I had suggested the 0.95 might come from giving the
+generator the target's true layout. The paper does not say this; it is not supported by the text and is removed.
+What *is* clear from Sec. 5.2.2 is that their pose-transfer test uses the same idea as our paired evaluation:
+two photos of the same clothes, the second one is the ground truth.
+
 ## 3. Why the numbers cannot be compared directly
 
-1. **Different tasks.** The paper's numeric tables are for *pose transfer* and *label-to-image*. Its garment-transfer
-   (try-on) results are only shown as pictures. We measure try-on: reference garment → target person.
+1. **Same idea, different protocol.** Our paired evaluation (reference = one photo of an outfit, ground truth =
+   another photo of the same outfit in another pose) *is* a pose-transfer test in substance, which is exactly why the
+   paper chose pose transfer for its numbers (Sec. 5.2.2). The differences are the pairs, the scoring region, the
+   resolution and the metric settings, not the task. Real try-on with a *different* garment has no ground truth in
+   either work (the paper shows it only as pictures; we use FID/KID).
 2. **Undocumented protocol.** The paper does not give its test pairs, crop, resolution, SSIM settings or FID sample size.
    It reports the same FID (8.60) for two different tasks. Its SSIM of 0.95 is far above every baseline in its own
    table (≤ 0.80).
 3. **Opposite meaning of LPIPS.** The paper marks LPIPS "higher is better" (diversity). We use it as a paired distance,
    where lower is better.
 4. **Region vs whole image.** Our SSIM / L1 / LPIPS count only garment + skin pixels. Whole-image scores on DeepFashion
-   are inflated by the white studio background (P20). On the full validation split, the same texture outputs scored
-   0.883 SSIM on the whole image but 0.540 on the person region.
+   are inflated by the white studio background and our white letterbox padding (P20). Measured on the same
+   260 real validation pairs with the same network (Experiment C's texture network, true layout): **whole image
+   0.898**, person region (all non-background pixels) 0.596 (training-log validation), garment + skin 0.583
+   (final-eval). The baseline B0 has region scores within 0.01 of these, but its whole-image score on these pairs
+   was never measured. Since 2026-10-26 the final evaluation reports all three regions for every variant, so this
+   is measured directly for B0 and for the end-to-end pipeline in the next validation run.
 5. **FID depends on sample size and resolution.** Even two sets of *real* photos score FID 14.47 in our setting
    (1,270 vs 1,271 images at 128 px). That is already worse than the paper's 8.60, so our FID cannot be read on the
    paper's scale. Measured directly: real train (10,160) vs real validation (1,271) photos give FID 9.11, but real

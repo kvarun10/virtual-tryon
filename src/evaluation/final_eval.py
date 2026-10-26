@@ -208,7 +208,8 @@ def eval_paired(models: TryOnModels, prepared: PreparedData, cfg: ProjectConfig,
         raise ValueError(f"No cross-view pairs in split '{split}' (check data.pair_filter)")
     region_ids = G.indices(list(cfg.labels.transfer_classes) + ["skin"])
     variants = ["gt_layout", "e2e_raw", "e2e", "copy"] + (["auto_raw", "auto"] if auto_parser else [])
-    scores = {v: {"ssim": [], "l1": [], "lpips": []} for v in variants}
+    metric_keys = [f"{m}{r}" for r in ("", "_person", "_whole") for m in ("ssim", "l1", "lpips")]
+    scores = {v: {k: [] for k in metric_keys} for v in variants}
     cm_e2e = ConfusionMatrix(G.num_classes, ignore_index=255)
     cm_auto = ConfusionMatrix(G.num_classes, ignore_index=255)
     rows, pair_names = [], []
@@ -231,13 +232,16 @@ def eval_paired(models: TryOnModels, prepared: PreparedData, cfg: ProjectConfig,
             auto = tryon_core(models, ref_img, auto_parser(ref_rec), real, body, auto_parser(ds.records[i]))
             imgs["auto_raw"], imgs["auto"] = auto["raw"], auto["result"]
         region = np.isin(gt_layout, region_ids)
+        regions = {"": region, "_person": gt_layout != 0, "_whole": None}  # None = every pixel (paper style)
         for v in variants:
-            m = _region_metrics(imgs[v], real, region)
-            scores[v]["ssim"].append(m["ssim"]); scores[v]["l1"].append(m["l1"])
-            if lpips_metric is not None:
-                a = torch.from_numpy(imgs[v]).permute(2, 0, 1)[None].float() / 255
-                b = torch.from_numpy(real).permute(2, 0, 1)[None].float() / 255
-                scores[v]["lpips"].append(float(lpips_metric(a, b, torch.from_numpy(region)[None])[0]))
+            a = torch.from_numpy(imgs[v]).permute(2, 0, 1)[None].float() / 255
+            b = torch.from_numpy(real).permute(2, 0, 1)[None].float() / 255
+            for suffix, mask in regions.items():
+                m = _region_metrics(imgs[v], real, mask if mask is not None else np.ones_like(region))
+                scores[v][f"ssim{suffix}"].append(m["ssim"]); scores[v][f"l1{suffix}"].append(m["l1"])
+                if lpips_metric is not None:
+                    mk = None if mask is None else torch.from_numpy(mask)[None]
+                    scores[v][f"lpips{suffix}"].append(float(lpips_metric(a, b, mk)[0]))
         tgt = gt_layout.astype(np.int64).copy()
         tgt[~np.isin(tgt, region_ids + [0])] = 255
         cm_e2e.update(core["c_warp"], tgt)
@@ -250,6 +254,9 @@ def eval_paired(models: TryOnModels, prepared: PreparedData, cfg: ProjectConfig,
             rows.append(np.concatenate(tiles, 1))
     excl = [0] + list(models.untrained_ids)
     out = {"pairs": len(idx), "pair_filter": cfg.data.pair_filter, "region": "garment + skin of the manual target parse",
+           "regions": {"<metric>": "garment + skin of the manual target parse (main protocol)",
+                       "<metric>_person": "every non-background pixel of the manual target parse",
+                       "<metric>_whole": "whole image incl. background and letterbox padding (paper-style)"},
            "warp_miou_7_e2e": cm_e2e.mean_iou(exclude=excl), "seconds": round(time.time() - t0, 1),
            "lpips": lpips_metric is not None}
     if auto_parser:
@@ -482,6 +489,15 @@ def format_results_table(r: Dict) -> str:
         for v, label in names.items():
             if f"{v}_ssim" in p:
                 L.append(f"| {label} | {_f(p[f'{v}_ssim'])} | {_f(p[f'{v}_l1'])} | {_f(p.get(f'{v}_lpips'))} |")
+        if "e2e_raw_ssim_whole" in p:
+            L += ["", "Same pairs, other scoring regions (person = all non-background pixels; whole = every pixel, "
+                  "paper style). The pasted variants use the target's own face/hair pixels, so only raw variants are "
+                  "fair for whole-image scoring.", "",
+                  "| variant | SSIM person | SSIM whole | L1 whole | LPIPS whole |", "|---|---|---|---|---|"]
+            for v, label in names.items():
+                if f"{v}_ssim_whole" in p:
+                    L.append(f"| {label} | {_f(p.get(f'{v}_ssim_person'))} | {_f(p[f'{v}_ssim_whole'])} | "
+                             f"{_f(p[f'{v}_l1_whole'])} | {_f(p.get(f'{v}_lpips_whole'))} |")
         L += ["", f"warp mIoU on these pairs: manual Stage A {_f(p.get('warp_miou_7_e2e'))}, automatic "
               f"{_f(p.get('warp_miou_7_auto'))}", ""]
     for key, title in (("realism", "T8 Realism of try-on results (different-item references)"),
