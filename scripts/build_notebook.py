@@ -87,6 +87,15 @@ EXPORT_RESULTS = True              # copy all logs/metrics/grids of this session
 SECURE_RESULTS = True              # verify every checkpoint loads, save small generator-only backups (Section 14)
 PRUNE_SNAPSHOTS = False            # True: delete redundant step_*.pt snapshots after verification (keeps last.pt + best.pt)
 FLUSH_DRIVE_AT_END = True          # push all pending writes to Drive; after this it is safe to delete the runtime
+
+# --- Paper-style benchmark: standard DeepFashion pose-transfer pairs (Section 12b) ----------------------
+RUN_PT_LEAKAGE = False             # which standard test pairs we may score (CPU, seconds)
+RUN_PT_BENCHMARK = False           # whole-image SSIM / LPIPS / FID on the scorable pairs (GPU, ~20-40 min)
+ALLOW_PAIR_DOWNLOAD = False        # once: the two pair lists (0.8 + 9.6 MB, approved 2026-10-26), into <drive>/datasets
+PT_LIMIT = None                    # None = all scorable pairs; a number = quick check (not reported)
+# --- DeepFashion In-shop inspection (Section 12c; needs the Drive shortcut, text files only) -------------
+RUN_INSHOP_INSPECTION = False
+INSHOP_DIR = "/content/drive/MyDrive/VirtualTryOn/datasets/In-shop Clothes Retrieval Benchmark"
 """)
 
 md(r"""
@@ -680,6 +689,51 @@ else:
     print("Skipped (baseline config, DRY_RUN, or COMPARE_WITH_BASELINE=False).")
 """)
 
+md(r"""
+## 12b. Paper-style benchmark (standard DeepFashion pose-transfer pairs)
+The public test pairs used by ADGAN and DiOr (8,570 pairs), scored like the paper's Table 1: whole 176 x 256 images, SSIM / L1 / LPIPS and FID/KID. Pairs whose products we trained on are never scored; our locked test products are skipped (`docs/paper_comparison.md` section 2c). Needs `FETCH_DFMM=True` (photos on the local disk).
+""")
+code(r"""
+pt_out = None
+if (RUN_PT_LEAKAGE or RUN_PT_BENCHMARK) and not DRY_RUN:
+    from scripts.pose_transfer_benchmark import main as pt_main
+    from PIL import Image
+    from IPython.display import display
+    import datetime as _dt
+    pt_out = paths.outputs / cfg.experiment.name / "pose_transfer" / _dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+    pt_args = ["--config", CONFIG_FILE, "--drive-root", str(paths.drive_root),
+               "--image-dir", str(Path(cfg.data.root) / cfg.data.layout.images_dir), "--out", str(pt_out),
+               *sum((["--override", o] for o in EXTRA_OVERRIDES), [])]
+    if ALLOW_PAIR_DOWNLOAD:
+        pt_args.append("--allow-pair-download")
+    if ALLOW_METRIC_DOWNLOAD:
+        pt_args += ["--override", "evaluation.allow_metric_download=true"]
+    if not RUN_PT_BENCHMARK:
+        pt_args.append("--leakage-only")
+    if PT_LIMIT:
+        pt_args += ["--limit", str(PT_LIMIT)]
+    pt_main(pt_args)
+    if (pt_out / "grid.png").is_file():
+        print("grid columns: reference (copy) | real target | ours raw | ours + face/hair paste")
+        display(Image.open(pt_out / "grid.png"))
+else:
+    print("Skipped (RUN_PT_LEAKAGE / RUN_PT_BENCHMARK are False, or DRY_RUN).")
+""")
+
+md(r"""
+## 12c. DeepFashion In-shop inspection (text annotations only)
+Needs a Drive shortcut to the shared "In-shop Clothes Retrieval Benchmark" folder in `VirtualTryOn/datasets/` and `FETCH_DFMM=True`.
+""")
+code(r"""
+if RUN_INSHOP_INSPECTION and not DRY_RUN:
+    from scripts.inspect_inshop import main as inshop_main
+    inshop_main(["--inshop", INSHOP_DIR, "--split-file", cfg.data.split_file,
+                 "--dfmm-images", str(Path(cfg.data.root) / cfg.data.layout.images_dir),
+                 "--out", str(paths.outputs / "inshop_inspection.json")])
+else:
+    print("Skipped (RUN_INSHOP_INSPECTION=False or DRY_RUN).")
+""")
+
 md("## 14. Saving and exporting\nWith `EXPORT_RESULTS=True` everything this session produced (training logs as CSV, evaluation metrics, grids, pair statistics) is copied to `<drive>/report_exports/<date-time>/`. Download that folder from Drive and put it in the project under `report/private/exports/`; no need to copy numbers by hand.")
 code(r"""
 if EXPORT_RESULTS and not DRY_RUN:
@@ -697,6 +751,10 @@ if EXPORT_RESULTS and not DRY_RUN:
         (exp_dir / "end_to_end_metrics.json").write_text(_json.dumps(e2e, indent=1, default=str))
         for g in (Path(e2e["grid"]).parent).glob("*.png"):
             shutil.copy(g, exp_dir / f"tryon_{g.name}")
+    if globals().get("pt_out") is not None and Path(pt_out).is_dir():
+        shutil.copytree(pt_out, exp_dir / f"pose_transfer_{Path(pt_out).name}", dirs_exist_ok=True)
+    if (paths.outputs / "inshop_inspection.json").is_file():
+        shutil.copy(paths.outputs / "inshop_inspection.json", exp_dir / "inshop_inspection.json")
     if globals().get("final"):
         shutil.copytree(final["out_dir"], exp_dir / f"{cfg.experiment.name}_final_eval_{final['split']}", dirs_exist_ok=True)
         from src.evaluation.final_eval import test_log_path
