@@ -43,6 +43,7 @@ Evidence paths refer to `report/` (numbers, charts), `docs/`, and `tests/`. Date
 | P30 | 10-24 | Workflow | Experiments could overwrite the baseline shown to the supervisor | fixed (tag, FROZEN guard, own folders) |
 | P31 | 10-24 | Stage B | Class-weighted CE (Exp B) made the warp worse; warp discriminator collapsed late in that run | closed (rejected) |
 | P32 | 10-24 | Stage C | More real pairs (Exp C) improved paired scores but worsened FID/KID of different-item try-ons | open (trade-off) |
+| P33 | 10-26 | Evaluation | Standard pose-transfer test pairs overlap our training items; the standard split itself shares 439/811 test items with its train pairs | handled (leakage categories) |
 
 ---
 
@@ -288,6 +289,17 @@ P19: outer is still the weakest class (0.548 IoU on test).
   same-outfit pairs of that subset and generalises less to new garment/person combinations.
 * **Next:** p = 0.4, or more diverse real pairs (In-shop, Experiment I).
 * **Status:** open (trade-off; not adopted).
+
+### P33 – Leakage between the standard pose-transfer pairs and our splits (2026-10-26)
+* **Evidence:** at least 582 of the 3,144 standard test photos are among our manually parsed images (partial local
+  check; the full count needs the split file in Colab). The standard split shares 439 of its 811 test items with its
+  own training pairs (measured on the downloaded CSVs).
+* **Risk:** scoring our current networks on standard pairs whose products we trained on would inflate the numbers;
+  scoring our locked test items would reuse the test split.
+* **Action:** pair-level categories by item (`src/data/pose_transfer.py`): leaked pairs are never scored, locked test
+  items are skipped, only validation items and never-used items are scored; tests in `tests/test_pose_transfer.py`.
+  A full 8,570-pair benchmark requires retraining with the standard test items excluded.
+* **Status:** handled.
 
 ---
 

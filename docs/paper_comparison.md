@@ -46,6 +46,25 @@ generator the target's true layout. The paper does not say this; it is not suppo
 What *is* clear from Sec. 5.2.2 is that their pose-transfer test uses the same idea as our paired evaluation:
 two photos of the same clothes, the second one is the ground truth.
 
+## 2c. Paper-style benchmark on the standard pose-transfer pairs (set up 2026-10-26)
+
+* **Pairs:** the public DeepFashion pose-transfer split of PATN (Zhu et al. 2019), used by ADGAN and DiOr:
+  `fasion-resize-pairs-test.csv` (8,570 pairs, 811 items, 3,144 photos; 802,612 bytes) and
+  `fasion-resize-pairs-train.csv` (101,966 pairs; 9,551,830 bytes), from the Google Drive folder linked in
+  github.com/tengteng95/Pose-Transfer (MIT), SHA-256 pinned in `src/data/pose_transfer.py`. Only these two files were
+  downloaded (the folder also holds keypoint annotations, a pose estimator and PATN weights, which this method does
+  not use). The Dress-up paper does not name its pairs; this is the common public protocol for its Table 1 baselines.
+* **Measured on the files:** every test pair is two photos of the same item; **439 of the 811 test items also occur
+  in the standard training pairs** (by item number), i.e. the published methods trained on other photos of most test
+  products. Our item-disjoint protocol is stricter than that.
+* **Leakage against our splits:** pairs are grouped by item (`categorise_pairs`): items we trained on are never
+  scored; our locked test items are skipped; validation items and items outside our splits are scored. The counts
+  are produced by `scripts/pose_transfer_benchmark.py --leakage-only` (Colab, needs our split file).
+* **Scoring (Table 1 style):** fully automatic pipeline, whole 176 × 256 image, SSIM / L1 / LPIPS (distance) and
+  FID/KID vs the real target photos. The raw output is primary; the face/hair-pasted variant copies ground-truth pixels
+  and is reported separately. Our networks run at 128 px and are upscaled, so this measures the *current* models at
+  a disadvantage; the full 8,570-pair result needs retraining at 256 px with the standard test items excluded.
+
 ## 3. Why the numbers cannot be compared directly
 
 1. **Same idea, different protocol.** Our paired evaluation (reference = one photo of an outfit, ground truth =
