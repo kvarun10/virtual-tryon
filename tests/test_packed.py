@@ -210,3 +210,21 @@ def test_inshop_loader_crops_to_dfmm_aspect(pack):
     st = PackedStore(pack[0])
     img = inshop_loader(st)(pack[2][0])
     assert img.shape == (256, 174, 3)
+
+
+def test_layout_eval_all_definitions(pack, tmp_path):
+    from src.evaluation.layout_eval import evaluate_layouts, format_layouts
+
+    cfg = _cfg(tmp_path, pack[0])
+    prep = load_packed(cfg)
+    WarpTrainer(cfg, prep, verbose=False).fit(max_steps=1, resume=False)
+    TextureTrainer(cfg, prep, verbose=False).fit(max_steps=1, resume=False)
+    models = load_tryon_models(cfg)
+    res = evaluate_layouts(models.warp, prep, cfg, models.device, models.untrained_ids)
+    assert res["images"] == len(prep.records("val"))
+    for k in ("supervised", "final_layout_auto", "final_layout_gt_identity"):
+        r = res[k]
+        assert 0 <= r["miou_excl_bg"] <= 1 and 0 <= r["miou_incl_bg"] <= 1 and 0 <= r["pixel_accuracy"] <= 1
+    gt = res["final_layout_gt_identity"]["per_class_iou"]
+    assert gt["face"] == 1.0  # face labels copied from the manual parse match it exactly
+    assert "mIoU incl. background" in format_layouts(res)
