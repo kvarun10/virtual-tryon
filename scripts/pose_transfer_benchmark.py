@@ -58,9 +58,10 @@ def main(argv=None) -> int:
         from src.data.packed import PackedStore
         from src.evaluation.pose_transfer_eval import inshop_loader
 
-        store = PackedStore(a.packed_dir)
-        available, load = set(store.index), inshop_loader(store)
+        store = PackedStore(a.packed_dir, body_source=cfg.data.body_source)
+        available, load = {n for n in store.index if store.has_body(n)}, inshop_loader(store)
     elif a.image_dir:
+        store = None
         available, load = {p.stem for p in a.image_dir.iterdir() if p.suffix.lower() == ".jpg"}, None
     else:
         ap.error("give --image-dir or --packed-dir")
@@ -80,12 +81,17 @@ def main(argv=None) -> int:
     from src.evaluation.pose_transfer_eval import evaluate_pose_transfer, format_pose_transfer
     from src.inference.tryon import load_tryon_models
 
+    body = None
+    if store is not None and cfg.data.body_source != "schp":
+        from src.evaluation.pose_transfer_eval import PackedBodyBackend
+
+        body = PackedBodyBackend(store, cfg.labels.body_label_set)
     models = load_tryon_models(cfg, warp=cfg.evaluation.warp_checkpoint, texture=cfg.evaluation.texture_checkpoint)
     print("models:", models.info, flush=True)
     w, allow = metric_weights_dir(cfg), cfg.evaluation.allow_metric_download
     res = evaluate_pose_transfer(models, cfg, test_pairs, categorise_pairs(test_pairs, splits, available), a.image_dir,
                                  LPIPSMetric(models.device, w, allow), InceptionFeatures(models.device, w, allow),
-                                 limit=a.limit, grid_path=out / "grid.png", load=load)
+                                 limit=a.limit, grid_path=out / "grid.png", load=load, body=body)
     res.update({"checkpoints": models.info, "limit": a.limit, "official": a.limit is None and not a.pairs_from,
                 "pairs_from": str(a.pairs_from) if a.pairs_from else None,
                 "image_source": "packed In-shop store" if a.packed_dir else "DFMM photos", "split_file": cfg.data.split_file})

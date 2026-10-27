@@ -44,7 +44,8 @@ from src.evaluation.metrics import ssim
 from src.models.discriminator import MultiScaleDiscriminator
 from src.models.spade_generator import build_texture_generator
 from src.training.base import GANTrainer
-from src.training.losses import VGGPerceptualLoss, feature_matching, multiscale_hinge_d, multiscale_hinge_g
+from src.training.losses import (VGGPerceptualLoss, feature_matching, multilayer_contextual, multiscale_hinge_d,
+                                 multiscale_hinge_g)
 from src.utils.paths import ProjectPaths
 
 
@@ -73,7 +74,7 @@ class TextureTrainer(GANTrainer):
                                             cfg.model.disc_scales, cfg.model.spectral_norm).to(self.device)
         self.opt_g = torch.optim.Adam(self.gen.parameters(), lr=t.lr_generator, betas=tuple(t.betas))  # [P] Sec. 5.1
         self.opt_d = torch.optim.Adam(self.disc.parameters(), lr=t.lr_discriminator, betas=tuple(t.betas))
-        self.use_vgg = t.lambda_tex_vgg > 0
+        self.use_vgg = t.lambda_tex_vgg > 0 or t.lambda_tex_context > 0
         if self.use_vgg:
             self.vgg = (vgg or VGGPerceptualLoss(t.texture_vgg_init, Path(cfg.paths.pretrained_dir) / "torch",
                                                  t.allow_vgg_download)).to(self.device)
@@ -121,8 +122,14 @@ class TextureTrainer(GANTrainer):
                 losses["domain"] = F.l1_loss(out["feat_x"].float(), fy_t.float())
             if t.lambda_tex_l1 > 0:
                 losses["l1"] = F.l1_loss(fake.float(), image.float())
+        if t.lambda_tex_context > 0:  # outside autocast: the pairwise feature distances need fp32
+            with torch.no_grad():
+                ex_feats = self.vgg.contextual_features(ex)
+            losses["context"] = multilayer_contextual(self.vgg.contextual_features(fake), ex_feats)
+        with self.autocast():
             weights = {"g_adv": t.lambda_tex_adv, "fm": t.lambda_tex_fm, "vgg": t.lambda_tex_vgg, "warp": t.lambda_tex_warp,
-                       "cycle": t.lambda_tex_cycle, "domain": t.lambda_tex_domain, "l1": t.lambda_tex_l1}
+                       "cycle": t.lambda_tex_cycle, "domain": t.lambda_tex_domain, "l1": t.lambda_tex_l1,
+                       "context": t.lambda_tex_context}
             loss_g = sum(weights[k] * v for k, v in losses.items())
         if not torch.isfinite(loss_g):
             raise FloatingPointError(f"non-finite texture loss at step {self.step}: { {k: v.item() for k, v in losses.items()} }")
@@ -137,7 +144,7 @@ class TextureTrainer(GANTrainer):
                                             self.disc(torch.cat([fake.detach(), layout], 1)))
             self.scaler.scale(d_loss / accum).backward()
             rec["d"] = d_loss.item()
-        for k in ("g_adv", "fm", "vgg", "warp", "cycle", "domain", "l1"):
+        for k in ("g_adv", "fm", "vgg", "warp", "cycle", "domain", "l1", "context"):
             rec.setdefault(k, 0.0)  # constant keys so the loop can average over accumulation steps
         return rec
 

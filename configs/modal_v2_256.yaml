@@ -1,0 +1,25 @@
+# v2: the one-shot upgrade of full_256 (docs/modal.md, "v2"). Own experiment folder "v2_256"; full_256 and B0 are
+# never touched. All settings decided before training (no tuning on validation or on the benchmark):
+#   * warp: DensePose body maps (body15: 14 parts with left/right) instead of SCHP-Pascal (7 parts); retrained from
+#     scratch with the full_256 warp recipe (photos without a DensePose map are skipped for the warp only)
+#   * texture: fine-tuned from full_256 (its body input is unchanged) with + pixel L1 (5) + contextual loss to the
+#     exemplar (1, CoCosNet) and a linear learning-rate decay to 0 over the fine-tune
+# Selection: each new stage is kept only if it beats full_256 on the validation split.
+_base_: modal_full_256.yaml
+
+experiment:
+  name: v2_256
+
+data:
+  body_source: densepose
+
+labels:
+  body_label_set: body15
+
+training:
+  warp_run_name: warp_dp
+  texture_run_name: texture_ft
+  texture_init_from: "{checkpoints_dir}/full_256/texture/last.pt"   # the warp starts fresh
+  lambda_tex_l1: 5.0
+  lambda_tex_context: 1.0
+  lr_decay_from: 0

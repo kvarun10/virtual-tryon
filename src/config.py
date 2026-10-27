@@ -109,6 +109,7 @@ class DataConfig:
     # Packed store (src/data/packed.py): pre-resized In-shop photos + label maps in a few files. "" = off (DFMM files).
     packed_dir: str = ""
     label_source: str = "manual_then_auto"  # packed only: manual | manual_then_auto (SCHP labels where no manual)
+    body_source: str = "schp"  # packed only: schp (SCHP-Pascal maps) | densepose (dataset DensePose; photos without one are skipped)
 
 
 @dataclass
@@ -182,6 +183,10 @@ class TrainingConfig:  # warp fields used from Phase 4; texture fields reserved 
     lambda_tex_cycle: float = 1.0  # correspondence cycle regularisation [R:CoCosNet L_reg]
     lambda_tex_domain: float = 5.0  # domain alignment F_x(layout) ~ F_y(image) [R:CoCosNet]
     lambda_tex_l1: float = 0.0  # plain pixel L1 to ground truth (off by default)
+    lambda_tex_context: float = 0.0  # contextual loss to the EXEMPLAR (CoCosNet; relu3_2/4_2/5_2), 0 = off
+    warp_init_from: str = ""  # start a NEW warp run from these weights (gen, gen_ema, disc); fresh optimisers, step 0
+    texture_init_from: str = ""  # same for the texture stage
+    lr_decay_from: int = -1  # >=0: linear LR decay to 0 from this step to the run's last step (G and D)
     texture_vgg_init: str = "imagenet"  # imagenet | random (random only for offline tests)
     allow_vgg_download: bool = False  # torchvision VGG-19 ImageNet weights (~548 MB), cached in pretrained/torch
     ema_decay: float = 0.0  # >0: keep an exponential moving average of the generator; used for validation/inference
@@ -358,6 +363,8 @@ def _resolve_placeholders(cfg: ProjectConfig) -> None:
         setattr(cfg.data, attr, fmt(getattr(cfg.data, attr)))
     for attr in ("body_maps_local", "body_maps_archive"):
         setattr(cfg.segmentation, attr, fmt(getattr(cfg.segmentation, attr)))
+    cfg.training.warp_init_from = fmt(cfg.training.warp_init_from)
+    cfg.training.texture_init_from = fmt(cfg.training.texture_init_from)
     for attr in ("warp_checkpoint", "texture_checkpoint", "metric_weights_dir", "test_log"):
         setattr(cfg.evaluation, attr, fmt(getattr(cfg.evaluation, attr)))
 
@@ -384,6 +391,8 @@ def validate_config(cfg: ProjectConfig) -> None:
         raise ConfigError("data.pair_filter must be none|classes|classes_color|same_seq")
     if data.pair_color_metric not in {"max", "weighted"}:
         raise ConfigError("data.pair_color_metric must be max|weighted")
+    if data.body_source not in {"schp", "densepose"}:
+        raise ConfigError("data.body_source must be schp|densepose")
     if data.label_source not in {"manual", "manual_then_auto"}:
         raise ConfigError("data.label_source must be manual|manual_then_auto")
     if not 0.0 <= cfg.training.ema_decay < 1.0:

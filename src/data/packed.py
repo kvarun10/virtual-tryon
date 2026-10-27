@@ -13,6 +13,8 @@ Layout of ``<packed_dir>`` (written by :mod:`src.data.packing`)::
     garment_manual.*       garment12 PNGs from DFMM manual parsing (empty entry = no manual label)
     garment_auto.*         garment12 PNGs from SCHP-LIP (every photo)
     body.*                 body maps (labels.body_label_set) from SCHP-Pascal (every photo)
+    body_dp.*              optional: DensePose body maps (body15), empty entry = no DensePose for that photo
+                           (written by src.data.packing.add_densepose; used when data.body_source=densepose)
     splits.json            {"splits": {"train", "val", "test"}, "meta": {...}}  (see build_packed_splits)
     pairs.csv              same-item pair table (src/data/pair_quality.py format) for data.pair_filter
 
@@ -127,7 +129,7 @@ class PackedRecord:
 
 
 class PackedStore:
-    def __init__(self, directory: Path, label_source: str = "manual_then_auto"):
+    def __init__(self, directory: Path, label_source: str = "manual_then_auto", body_source: str = "schp"):
         self.dir = Path(directory)
         meta_path = self.dir / "meta.json"
         if not meta_path.is_file():
@@ -146,6 +148,15 @@ class PackedStore:
             if len(r) != len(self.records):
                 raise PackedStoreError(f"{self.dir}: blob '{b}' has {len(r)} entries for {len(self.records)} names")
         self.size = tuple(self.meta["size"])
+        self.body_source = body_source
+        self.dp = None
+        if (self.dir / "body_dp.idx.npy").is_file():
+            self.dp = BlobReader(self.dir / "body_dp")
+            if len(self.dp) != len(self.records):
+                raise PackedStoreError(f"{self.dir}: body_dp has {len(self.dp)} entries for {len(self.records)} names")
+            self._has_dp = np.diff(self.dp.offsets) > 0
+        elif body_source == "densepose":
+            raise PackedStoreError(f"{self.dir}: no DensePose maps (body_dp); run src.data.packing.add_densepose first")
 
     def __len__(self) -> int:
         return len(self.records)
@@ -167,8 +178,18 @@ class PackedStore:
     def garment_auto(self, name: str) -> np.ndarray:
         return decode_png(self.blobs["garment_auto"].get(self.index[name]))
 
+    def has_body(self, name: str) -> bool:
+        """False only when DensePose maps are requested and this photo has none."""
+        return self.body_source != "densepose" or bool(self._has_dp[self.index[name]])
+
     def body(self, name: str) -> np.ndarray:
-        return decode_png(self.blobs["body"].get(self.index[name]))
+        i = self.index[name]
+        if self.body_source == "densepose":
+            data = self.dp.get(i)
+            if not data:
+                raise KeyError(f"{name}: no DensePose map")
+            return decode_png(data)
+        return decode_png(self.blobs["body"].get(i))
 
 
 class _PackedIndex:
@@ -202,7 +223,7 @@ class PackedPrepared:
 
 
 def load_packed(cfg: ProjectConfig) -> PackedPrepared:
-    store = PackedStore(Path(cfg.data.packed_dir), cfg.data.label_source)
+    store = PackedStore(Path(cfg.data.packed_dir), cfg.data.label_source, cfg.data.body_source)
     if tuple(cfg.data.image_size) != store.size:
         print(f"note: packed store is {store.size}, model size {tuple(cfg.data.image_size)}; maps are resized per sample")
     split_path = Path(cfg.data.split_file)

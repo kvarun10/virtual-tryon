@@ -97,6 +97,7 @@ class VGGPerceptualLoss(nn.Module):
     """
 
     LAYER_ENDS = (2, 7, 12, 21, 30)  # indices in vgg19.features after relu1_1 ... relu5_1
+    CONTEXT_ENDS = (14, 23, 32)  # after relu3_2, relu4_2, relu5_2 (contextual loss; relu2_2 is too large at 256 px)
     WEIGHTS = (1 / 32, 1 / 16, 1 / 8, 1 / 4, 1.0)
 
     def __init__(self, init: str = "imagenet", cache_dir=None, allow_download: bool = False):
@@ -120,6 +121,7 @@ class VGGPerceptualLoss(nn.Module):
             model = vgg19(weights=None)
             model.load_state_dict(torch.load(file, map_location="cpu", weights_only=True))
             features = model.features
+        self.features = features[: max(self.CONTEXT_ENDS)]  # shared, frozen (also used by contextual_features)
         self.slices = nn.ModuleList()
         start = 0
         for end in self.LAYER_ENDS:
@@ -134,6 +136,17 @@ class VGGPerceptualLoss(nn.Module):
 
     def train(self, mode: bool = True):  # always frozen / eval
         return super().train(False)
+
+    def contextual_features(self, img: torch.Tensor):
+        """VGG-19 relu3_2 / relu4_2 / relu5_2 features of an image in [-1, 1]."""
+        x = ((img.float() + 1) / 2 - self.mean) / self.std
+        out, start = [], 0
+        for end in self.CONTEXT_ENDS:
+            for i in range(start, end):
+                x = self.features[i](x)
+            out.append(x)
+            start = end
+        return out
 
     def forward(self, fake: torch.Tensor, real: torch.Tensor) -> torch.Tensor:
         x = ((fake.float() + 1) / 2 - self.mean) / self.std
@@ -165,3 +178,26 @@ def feature_matching(real_outs, fake_outs) -> torch.Tensor:
             loss = loss + F.l1_loss(f.float(), r.detach().float())
             n += 1
     return loss / max(n, 1)
+
+
+def contextual_loss(x: torch.Tensor, y: torch.Tensor, h: float = 0.5, eps: float = 1e-5) -> torch.Tensor:
+    """Contextual loss (Mechrez et al. 2018, used by CoCosNet) between feature maps ``x`` (generated) and ``y``
+    (exemplar), both [B, C, H, W]. Features are compared by cosine similarity regardless of position, so the
+    generated image is pushed to contain the exemplar's textures wherever they now appear. Computed in fp32.
+
+    CX_ij = normalised exp((1 - d_ij / min_k d_ik) / h) over exemplar features j; CX = mean_j max_i CX_ij;
+    loss = -log CX. 0 when every exemplar feature has an exact match in the generated image.
+    """
+    x, y = x.float(), y.float().detach()
+    mu = y.mean(dim=(0, 2, 3), keepdim=True)
+    x = F.normalize((x - mu).flatten(2), dim=1)  # B, C, N
+    y = F.normalize((y - mu).flatten(2), dim=1)  # B, C, M
+    d = 1.0 - torch.bmm(x.transpose(1, 2), y)  # B, N, M  cosine distances
+    d = d / (d.min(dim=2, keepdim=True)[0] + eps)
+    w = torch.exp((1.0 - d) / h)
+    cx = (w / w.sum(dim=2, keepdim=True)).max(dim=1)[0].mean(dim=1)  # B
+    return (-torch.log(cx + eps)).mean()
+
+
+def multilayer_contextual(fake_feats, exemplar_feats) -> torch.Tensor:
+    return sum(contextual_loss(f, e) for f, e in zip(fake_feats, exemplar_feats)) / len(fake_feats)

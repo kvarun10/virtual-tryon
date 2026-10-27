@@ -101,7 +101,8 @@ class WarpTripletDataset(Dataset):
 
     def __init__(self, prepared: PreparedData, split: str, cfg: ProjectConfig, train: bool,
                  body_source: Optional[BodyMapSource] = None, pairing: Optional[str] = None):
-        self.records = [r for r in prepared.records(split) if r.parsing]
+        store = getattr(prepared, "store", None)
+        self.records = [r for r in prepared.records(split) if r.parsing and (store is None or store.has_body(r.name))]
         if not self.records:
             raise ValueError(f"No annotated images in split '{split}'")
         self.cfg, self.t = cfg, cfg.training
