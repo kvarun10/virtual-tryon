@@ -1,0 +1,21 @@
+{
+ "standard_test_pairs": 8570,
+ "standard_test_items": 811,
+ "standard_train_pairs": 101966,
+ "standard_train_items": 6625,
+ "standard_train_test_item_overlap": 439,
+ "pairs_by_category": {
+  "clean_unseen": 7048,
+  "clean_val_items": 942,
+  "our_test_items_LOCKED": 580,
+  "our_train_items_LEAKED": 0,
+  "image_missing": 0
+ },
+ "standard_test_items_in_our_splits": {
+  "train": 0,
+  "val": 82,
+  "test": 54
+ },
+ "scorable_now": 7990,
+ "note": "Scorable = items never used for training and not in our locked test split. A full 8,570-pair benchmark needs networks retrained with the standard test items excluded from training."
+}

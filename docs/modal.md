@@ -85,3 +85,52 @@ Smoke-test packing (200 photos, L4): 11 s; SCHP-LIP vs manual on 55 photos: pixe
 * The paper's evaluation protocol is unpublished (paper_comparison.md); matching 0.95 SSIM is not guaranteed.
 * Our locked test items stay unscored in the benchmark; the count is in the report.
 * Automatic labels carry SCHP errors (e.g. top/outer confusion, P11) into training targets.
+
+## Results (2026-10-27)
+
+Training: warp 60,000 steps (L40S, 12 CPU cores; 40k planned, extended to 60k because validation mIoU was still
+rising, val CE still falling); texture 50,000 steps (H100, 210.7 min). For both, the final checkpoint was also the best
+validation checkpoint; validation never declined (no sign of overfitting). Total Modal cost $22.99 (all from the $30
+Starter credit; billed $0). Final generator weights (EMA): `checkpoints/full_256/{warp,texture}/generator_only.pt`
+on the volume, copied to `report/private/models/full_256/` (not in git).
+
+### Paper-style benchmark (standard PATN test pairs, whole 176 x 256 image, In-shop photos, fully automatic)
+
+| | pairs | SSIM | L1 | LPIPS (distance) | FID |
+|---|---|---|---|---|---|
+| **full_256, raw output** | 7,990 | **0.699** | 0.068 | **0.205** | **13.64** (7,990 vs 2,932 real) |
+| full_256 + target face/hair pixels (uses GT pixels) | 7,990 | 0.739 | 0.061 | 0.193 | |
+| copy the reference photo | 7,990 | 0.514 | 0.158 | 0.464 | |
+| ADGAN / DiOr / Dress-up (published Table 1) | 8,570? | 0.77 / 0.80 / 0.95 | | 0.226 / 0.176 / 0.228 | 16.69 / 14.34 / 8.60 |
+
+Same 1,570 pairs as B0 (paired bootstrap, 95 % CI of new - B0):
+
+| | B0 (128 px) | full_256 | difference |
+|---|---|---|---|
+| SSIM raw | 0.631 | 0.676 | +0.045 [+0.043, +0.047] |
+| LPIPS raw | 0.396 | 0.218 | -0.178 [-0.181, -0.175] |
+| L1 raw | 0.091 | 0.072 | -0.019 [-0.021, -0.018] |
+| SSIM with face/hair paste | 0.659 | 0.718 | +0.059 [+0.057, +0.061] |
+
+7,990 of 8,570 pairs were scorable: no standard test item was trained on; 580 pairs of our locked test items stay
+unscored (test split used once). B0 could only be scored on 1,570 pairs (it trained on the items of the other 6,420).
+
+How it compares with the published numbers (protocol differences: the paper does not publish its pairs, resolution,
+region or FID sample size; ADGAN/DiOr are scored on all 8,570 pairs; FID depends on sample size and Inception code):
+* **FID 13.64 is lower than ADGAN (16.69) and DiOr (14.34)**, but higher than Dress-up's 8.60.
+* **LPIPS 0.205** (as a distance, lower is better) is lower than ADGAN 0.226 and Dress-up 0.228, higher than DiOr
+  0.176. The paper labels LPIPS "higher is better" ("diversity"), so its LPIPS column is not directly comparable.
+* **SSIM 0.699 is below** ADGAN 0.77, DiOr 0.80 and Dress-up 0.95.
+
+### Garment layout (warp stage), all 1,271 validation photos, same pairs for both models
+
+| definition | B0 (128 px) | full_256 | paper Table 2 |
+|---|---|---|---|
+| mIoU excl. background (training metric) | 70.8 | **77.9** | 87.6 (definition not published) |
+| mIoU incl. background | 74.3 | **80.5** | |
+| pixel accuracy | 97.2 | **98.0** | 98.9 |
+| final layout (warp + automatic face/hair), all 12 classes incl. background | 62.1 | 66.2 | |
+
+The final-layout definition counts headwear and accessories, which the method never transfers (IoU 0), so it is lower.
+Per-class IoU (full_256, training metric): pants 0.85, dress 0.84, top 0.82, skirt 0.80, skin 0.75, outer 0.71,
+footwear 0.67. Files: report/data/layout_eval_*_20261027.md, pose_transfer_*_20261027.md, pack256_report_20261027.json.

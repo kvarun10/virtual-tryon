@@ -1,0 +1,83 @@
+{
+ "meta": {
+  "version": 1,
+  "size": [
+   256,
+   256
+  ],
+  "garment_label_set": "garment12",
+  "body_label_set": "pascal_person_part",
+  "photos": 52712,
+  "manual": 12701,
+  "sources": {
+   "images": "img.zip (In-shop, JPEG bytes unchanged)",
+   "partition": "list_eval_partition.txt",
+   "manual_parsing": "parsing.zip",
+   "garment_auto": {
+    "name": "schp_lip",
+    "role": "clothing",
+    "label_set": "lip",
+    "checkpoint": "/vol/project/pretrained/schp/exp-schp-201908261155-lip.pth",
+    "input_size": [
+     473,
+     473
+    ],
+    "architecture": "SCHP ResNet-101 (CE2P), pure-PyTorch ABN"
+   },
+   "body": {
+    "name": "schp_pascal",
+    "role": "body",
+    "label_set": "pascal_person_part",
+    "checkpoint": "/vol/project/pretrained/schp/exp-schp-201908270938-pascal-person-part.pth",
+    "input_size": [
+     512,
+     512
+    ],
+    "architecture": "SCHP ResNet-101 (CE2P), pure-PyTorch ABN"
+   }
+  },
+  "built_at": "2026-10-27 08:15:40"
+ },
+ "parser_agreement_vs_manual_garment12": {
+  "pixel_accuracy": 0.9633117476351364,
+  "miou_excl_background": 0.599499245145647,
+  "iou": {
+   "background": 0.9821,
+   "hair": 0.7647,
+   "face": 0.8296,
+   "skin": 0.7208,
+   "top": 0.7165,
+   "outer": 0.5031,
+   "dress": 0.6265,
+   "skirt": 0.3113,
+   "pants": 0.7562,
+   "footwear": 0.7081,
+   "headwear": 0.6372,
+   "accessory": 0.0205
+  },
+  "photos": 12701
+ },
+ "pairs": 322641,
+ "items": 7982,
+ "items_with_2plus_photos": 7970,
+ "splits": {
+  "rule": "train = all photos whose item is not in old val/test or the standard pose-transfer test items",
+  "counts": {
+   "train": 36064,
+   "val": 1271,
+   "test": 1270
+  },
+  "train_manual": 8530,
+  "unused_photos": {
+   "val_or_test_items": 9609,
+   "protected_items": 7039
+  },
+  "old_train_photos_dropped_as_protected": 1630,
+  "protected_items": 811
+ },
+ "seconds": {
+  "pass1": 1377.1,
+  "gpu": 1255.8,
+  "total": 1494.0
+ }
+}
