@@ -238,6 +238,37 @@ def run_benchmark(which: str = "full_256", limit: int = 0, pairs_from: str = "",
     return str(out)
 
 
+@app.function(**COMMON, gpu="L4", cpu=6, memory=24576, timeout=3600)
+def run_layout_eval(which: str = "full_256") -> dict:
+    """Warp-stage layout accuracy on all validation photos, every mIoU definition (src/evaluation/layout_eval.py).
+    Both models are scored on the same validation pairs (packed store, same pair table)."""
+    _code()
+    _stage_pack()
+    from src.data.packed import load_packed
+    from src.evaluation.layout_eval import evaluate_layouts, format_layouts
+    from src.inference.tryon import load_tryon_models
+
+    if which == "b0":
+        ck = f"{PROJECT}/checkpoints/baseline_128"
+        cfg = _cfg("colab_pairfilter.yaml", [f"paths.drive_root={PROJECT}",
+                                              f"evaluation.warp_checkpoint={ck}/warp_pf/generator_only.pt",
+                                              f"evaluation.texture_checkpoint={ck}/texture_pf/generator_only.pt"])
+    else:
+        cfg = _cfg("modal_full_256.yaml")
+    models = load_tryon_models(cfg, warp=cfg.evaluation.warp_checkpoint, texture=cfg.evaluation.texture_checkpoint)
+    res = evaluate_layouts(models.warp, load_packed(cfg), cfg, models.device, models.untrained_ids)
+    res["checkpoints"] = models.info
+    text = format_layouts(res)
+    out = Path(PROJECT, "outputs", "baseline_128" if which == "b0" else which, "layout_eval")
+    out.mkdir(parents=True, exist_ok=True)
+    stamp = time.strftime("%Y%m%d_%H%M%S")
+    (out / f"{stamp}.json").write_text(json.dumps(res, indent=1, default=str), encoding="utf-8")
+    (out / f"{stamp}.md").write_text(text, encoding="utf-8")
+    vol.commit()
+    print(text)
+    return res
+
+
 @app.function(**COMMON, cpu=1, memory=2048, timeout=600)
 def volume_status() -> dict:
     vol.reload()
@@ -291,6 +322,11 @@ def train(stage: str, max_steps: int, gpu: str = "H100", time_limit_min: float =
 @app.local_entrypoint()
 def benchmark(which: str = "full_256", limit: int = 0, gpu: str = "L4", pairs_from: str = "", tag: str = ""):
     print(run_benchmark.with_options(gpu=GPU_ALIASES.get(gpu, gpu)).remote(which, limit, pairs_from, tag))
+
+
+@app.local_entrypoint()
+def layout_eval(which: str = "full_256"):
+    run_layout_eval.remote(which)
 
 
 @app.local_entrypoint()
