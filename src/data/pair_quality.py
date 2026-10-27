@@ -106,8 +106,15 @@ def build_pair_table(records, root: Path, transfer_classes, progress: bool = Tru
 
         it = tqdm(todo, desc="garment signatures")
     sigs = {r.name: _signature_for(r, root, classes) for r in it}
+    return pair_rows(multi, sigs)
+
+
+def pair_rows(groups: Dict[str, list], sigs: Dict) -> List[Dict]:
+    """Table rows for every unordered pair within each item group. ``groups``: item -> records with
+    ``name`` / ``seq`` / ``view``; ``sigs``: name -> :func:`garment_signature`."""
+    G = get_label_set("garment12")
     rows = []
-    for item, recs in sorted(multi.items()):
+    for item, recs in sorted(groups.items()):
         for a, b in itertools.combinations(sorted(recs, key=lambda r: r.name), 2):
             sa, sb = sigs[a.name], sigs[b.name]
             row = {"item_id": item, "a": a.name, "b": b.name, "seq_a": a.seq or "", "seq_b": b.seq or "",

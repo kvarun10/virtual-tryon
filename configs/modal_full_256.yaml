@@ -1,0 +1,39 @@
+# Full-data 256 px run on Modal (docs/modal.md). Own experiment folder "full_256": the frozen B0 (baseline_128) is
+# never touched. Changes vs B0, all decided before training (no repeated tuning on validation):
+#   * data: all In-shop photos (packed store, src/data/packed.py), manual parsing where it exists, SCHP-LIP labels
+#     elsewhere; standard pose-transfer test items and our val/test items excluded from training (splits.json)
+#   * resolution 256 x 256 and the CoCosNet/SPADE widths (texture_corr_size 64, generator_base_channels 64)
+#   * batch 16; EMA of the generator weights (decay 0.999) used for validation and inference
+#   * TF32 / cudnn.benchmark (speed only)
+# Unchanged from B0: losses and their weights, learning rates, pair filter (classes + colour dE <= 15), label sets.
+_base_: colab_pairfilter.yaml
+
+experiment:
+  name: full_256
+  run_mode: extended
+
+paths:
+  drive_root: /vol/project          # Modal volume "tryon-vol" mounted at /vol
+
+data:
+  image_size: [256, 256]
+  packed_dir: /vol/pack256          # the training jobs copy it to local disk and override these three paths
+  label_source: manual_then_auto
+  split_file: /vol/pack256/splits.json
+  pair_table: /vol/pack256/pairs.csv
+  num_workers: 6
+
+training:
+  batch_size: 16
+  grad_accum_steps: 1
+  ema_decay: 0.999
+  fast_math: true
+  warp_run_name: warp
+  texture_run_name: texture
+  checkpoint_every: 1000
+  val_every: 2000
+  val_max_batches: 30
+
+model:
+  texture_corr_size: 64
+  generator_base_channels: 64

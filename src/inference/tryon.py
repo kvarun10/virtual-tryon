@@ -69,8 +69,8 @@ def _load_generator(model: torch.nn.Module, path: Path, stage: str) -> Dict:
         diff = {k: (saved.get(k), v) for k, v in model.cfg.items() if saved.get(k) != v}
         raise CheckpointMismatchError(f"{stage} checkpoint {path} was trained with a different architecture "
                                       f"(checkpoint vs config): {diff}")
-    model.load_state_dict(st["gen"])
-    return {"path": str(path), "step": st.get("step")}
+    model.load_state_dict(st.get("gen_ema", st["gen"]))  # EMA weights when the run kept them
+    return {"path": str(path), "step": st.get("step"), "weights": "ema" if "gen_ema" in st else "live"}
 
 
 def load_tryon_models(cfg: ProjectConfig, warp: Union[str, Path] = "last", texture: Union[str, Path] = "last",
