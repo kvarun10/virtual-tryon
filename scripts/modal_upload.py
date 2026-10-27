@@ -82,13 +82,37 @@ def main(argv=None) -> int:
     print(f"total {total / 1e9:.2f} GB")
     if a.dry_run:
         return 0
+    import time
+
     import modal
 
     vol = modal.Volume.from_name("tryon-vol", create_if_missing=True)
-    with vol.batch_upload(force=True) as batch:
-        for local, remote in plan:
+
+    def remote_size(path: str):
+        try:
+            entries = vol.listdir(str(Path(path).parent.as_posix()))
+        except Exception:  # noqa: BLE001  (folder does not exist yet)
+            return None
+        for e in entries:
+            if "/" + e.path.lstrip("/") == path:
+                return getattr(e, "size", None)
+        return None
+
+    done = 0
+    for local, remote in plan:  # one file per batch: each file is committed as soon as it is uploaded
+        size = Path(local).stat().st_size
+        if remote_size(remote) == size:
+            done += size
+            print(f"skip (already uploaded) {remote}", flush=True)
+            continue
+        t = time.time()
+        with vol.batch_upload(force=True) as batch:
             batch.put_file(str(local), remote)
-    print("uploaded to volume tryon-vol")
+        done += size
+        dt = max(time.time() - t, 1e-3)
+        print(f"uploaded {remote}: {size / 1e9:.2f} GB in {dt / 60:.1f} min ({size / 1e6 / dt:.2f} MB/s); "
+              f"total {done / 1e9:.2f}/{total / 1e9:.2f} GB", flush=True)
+    print("all files are on volume tryon-vol")
     return 0
 
 
