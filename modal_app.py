@@ -273,10 +273,15 @@ def probe(gpus: str = "H100,A100-40GB,L40S", steps: int = 40, batch_size: int = 
 
 
 @app.local_entrypoint()
-def train(stage: str, max_steps: int, gpu: str = "H100", time_limit_min: float = 0, overrides: str = ""):
+def train(stage: str, max_steps: int, gpu: str = "H100", time_limit_min: float = 0, overrides: str = "", cpu: int = 0):
+    """``--cpu N`` gives the container N cores and N - 1 DataLoader workers (the warp stage is CPU-bound)."""
     if stage not in ("warp", "texture"):
         raise SystemExit("--stage must be warp or texture")
-    fn = train_stage.with_options(gpu=GPU_ALIASES.get(gpu, gpu))
+    opts = {"gpu": GPU_ALIASES.get(gpu, gpu)}
+    if cpu:
+        opts["cpu"] = float(cpu)
+        overrides = ";".join(o for o in (overrides, f"data.num_workers={cpu - 1}") if o)
+    fn = train_stage.with_options(**opts)
     print(json.dumps(fn.remote(stage, max_steps, time_limit_min, "modal_full_256.yaml", overrides), indent=1))
 
 
