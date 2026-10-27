@@ -48,6 +48,25 @@ than ~1.9x faster than A100 40 GB. Plan: setup (CPU, ~$0.1), pack (L4, ~$0.6), p
 both stages in parallel (~$21), two benchmarks (L4, ~$1); ~$6 reserve. Step counts are fixed from the probe so the
 total stays under $25.
 
+## Measured (2026-10-27): GPU probe, batch 16, 256 px, 40 steps, median s/step after warm-up
+
+Measured on the 200-photo smoke-test store (speed per step does not depend on dataset size; means are higher because
+the tiny store restarts its DataLoader every few steps).
+
+| GPU | warp s/step | texture s/step | texture peak memory |
+|---|---|---|---|
+| H100 80 GB | 0.024 | 0.228 | 21 GB |
+| A100 40 GB | 0.048 | 0.439 | 30 GB |
+| L40S | 0.053 | 0.600 | 21 GB |
+
+The napkin estimate (texture ~1.1 s/step on H100) was ~4x too pessimistic. H100 is 1.9x the A100 for 1.9x the price,
+so it costs the same per step and halves the wall time: texture on H100. Warp at 0.024 s/step needs ~670 samples/s,
+which the CPU workers (per-class affine, body-part jitter) cannot deliver, so warp is data-bound: it runs on a cheaper
+GPU with more CPU cores. With the same budget the run is lengthened (decided before training, from cost only):
+texture ~50k steps (~3.5 h, ~$15), warp ~40k steps.
+
+Smoke-test packing (200 photos, L4): 11 s; SCHP-LIP vs manual on 55 photos: pixel accuracy 0.965, mIoU 0.594 (small sample).
+
 ## Order of work
 
 1. `python scripts/modal_upload.py` (2.7 GB: In-shop photos as one zip, partition list, cache + pretrained Drive zips,
