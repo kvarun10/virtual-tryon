@@ -211,7 +211,7 @@ def train_stage(stage: str, max_steps: int, time_limit_min: float = 0, config: s
 
 # ------------------------------------------------------------------------------------------------ benchmark (GPU)
 @app.function(**COMMON, gpu="L4", cpu=6, memory=24576, timeout=4 * 3600)
-def run_benchmark(which: str = "full_256", limit: int = 0) -> str:
+def run_benchmark(which: str = "full_256", limit: int = 0, pairs_from: str = "", tag: str = "") -> str:
     """Paper-style benchmark on the standard pose-transfer pairs, photos from the packed In-shop store."""
     _code()
     _stage_pack()
@@ -226,10 +226,13 @@ def run_benchmark(which: str = "full_256", limit: int = 0) -> str:
         args = ["--config", f"configs/modal_full_256.yaml", "--drive-root", PROJECT,
                 "--override", f"data.split_file={LOCAL_PACK}/splits.json",
                 "--override", f"data.packed_dir={LOCAL_PACK}"]
-    out = Path(PROJECT, "outputs", "baseline_128" if which == "b0" else which, "pose_transfer", time.strftime("%Y%m%d_%H%M%S"))
+    out = Path(PROJECT, "outputs", "baseline_128" if which == "b0" else which, "pose_transfer",
+               time.strftime("%Y%m%d_%H%M%S") + (f"_{tag}" if tag else ""))
     args += ["--packed-dir", LOCAL_PACK, "--out", str(out), "--override", "segmentation.cache_outputs=false"]
     if limit:
         args += ["--limit", str(limit)]
+    if pairs_from:
+        args += ["--pairs-from", pairs_from if pairs_from.startswith("/") else f"{PROJECT}/{pairs_from}"]
     bench(args)
     vol.commit()
     return str(out)
@@ -286,8 +289,8 @@ def train(stage: str, max_steps: int, gpu: str = "H100", time_limit_min: float =
 
 
 @app.local_entrypoint()
-def benchmark(which: str = "full_256", limit: int = 0, gpu: str = "L4"):
-    print(run_benchmark.with_options(gpu=GPU_ALIASES.get(gpu, gpu)).remote(which, limit))
+def benchmark(which: str = "full_256", limit: int = 0, gpu: str = "L4", pairs_from: str = "", tag: str = ""):
+    print(run_benchmark.with_options(gpu=GPU_ALIASES.get(gpu, gpu)).remote(which, limit, pairs_from, tag))
 
 
 @app.local_entrypoint()
