@@ -50,6 +50,7 @@ image = (
 )
 
 COMMON = dict(image=image, volumes={VOL: vol})
+CONFIGS = {"full_256": "modal_full_256.yaml", "v2_256": "modal_v2_256.yaml"}
 GPU_ALIASES = {"A100": "A100-40GB", "A100-40": "A100-40GB", "A100-80": "A100-80GB"}
 
 
@@ -211,7 +212,7 @@ def train_stage(stage: str, max_steps: int, time_limit_min: float = 0, config: s
 
 # ------------------------------------------------------------------------------------------------ benchmark (GPU)
 @app.function(**COMMON, gpu="L4", cpu=6, memory=24576, timeout=4 * 3600)
-def run_benchmark(which: str = "full_256", limit: int = 0, pairs_from: str = "", tag: str = "") -> str:
+def run_benchmark(which: str = "full_256", limit: int = 0, pairs_from: str = "", tag: str = "", overrides: str = "") -> str:
     """Paper-style benchmark on the standard pose-transfer pairs, photos from the packed In-shop store."""
     _code()
     _stage_pack()
@@ -223,7 +224,7 @@ def run_benchmark(which: str = "full_256", limit: int = 0, pairs_from: str = "",
                 "--override", f"evaluation.warp_checkpoint={ck}/warp_pf/generator_only.pt",
                 "--override", f"evaluation.texture_checkpoint={ck}/texture_pf/generator_only.pt"]
     else:
-        args = ["--config", f"configs/modal_full_256.yaml", "--drive-root", PROJECT,
+        args = ["--config", f"configs/{CONFIGS[which]}", "--drive-root", PROJECT,
                 "--override", f"data.split_file={LOCAL_PACK}/splits.json",
                 "--override", f"data.packed_dir={LOCAL_PACK}"]
     out = Path(PROJECT, "outputs", "baseline_128" if which == "b0" else which, "pose_transfer",
@@ -231,6 +232,8 @@ def run_benchmark(which: str = "full_256", limit: int = 0, pairs_from: str = "",
     args += ["--packed-dir", LOCAL_PACK, "--out", str(out), "--override", "segmentation.cache_outputs=false"]
     if limit:
         args += ["--limit", str(limit)]
+    for o in (o for o in overrides.split(";") if o):
+        args += ["--override", o]
     if pairs_from:
         args += ["--pairs-from", pairs_from if pairs_from.startswith("/") else f"{PROJECT}/{pairs_from}"]
     bench(args)
@@ -238,8 +241,28 @@ def run_benchmark(which: str = "full_256", limit: int = 0, pairs_from: str = "",
     return str(out)
 
 
+@app.function(**COMMON, cpu=4, memory=16384, timeout=3 * 3600)
+def add_densepose_maps(source: str = "dfmm", allow_download: bool = False) -> dict:
+    """Add DensePose body maps to /vol/pack256 (blob body_dp). ``dfmm``: DeepFashion-MultiModal densepose archive
+    (5.6 GB, official link; downloaded once into datasets/ only with allow_download)."""
+    _code()
+    from src.data.fetch import download_archive
+    from src.data.packing import add_densepose
+
+    if source != "dfmm":
+        raise ValueError("only the DFMM archive is wired up here")
+    z = download_archive("densepose", Path(PROJECT, "datasets", "DeepFashion-MultiModal", "archives"), allow_download)
+    vol.commit()
+    local = Path("/tmp/densepose.zip")
+    shutil.copy(z, local)
+    info = add_densepose(Path(PACK), local, "dfmm", "body15")
+    vol.commit()
+    print(json.dumps(info, indent=1))
+    return info
+
+
 @app.function(**COMMON, gpu="L4", cpu=6, memory=24576, timeout=3600)
-def run_layout_eval(which: str = "full_256") -> dict:
+def run_layout_eval(which: str = "full_256", overrides: str = "") -> dict:
     """Warp-stage layout accuracy on all validation photos, every mIoU definition (src/evaluation/layout_eval.py).
     Both models are scored on the same validation pairs (packed store, same pair table)."""
     _code()
@@ -254,7 +277,7 @@ def run_layout_eval(which: str = "full_256") -> dict:
                                               f"evaluation.warp_checkpoint={ck}/warp_pf/generator_only.pt",
                                               f"evaluation.texture_checkpoint={ck}/texture_pf/generator_only.pt"])
     else:
-        cfg = _cfg("modal_full_256.yaml")
+        cfg = _cfg(CONFIGS[which], [o for o in overrides.split(";") if o])
     models = load_tryon_models(cfg, warp=cfg.evaluation.warp_checkpoint, texture=cfg.evaluation.texture_checkpoint)
     res = evaluate_layouts(models.warp, load_packed(cfg), cfg, models.device, models.untrained_ids)
     res["checkpoints"] = models.info
@@ -307,7 +330,8 @@ def probe(gpus: str = "H100,A100-40GB,L40S", steps: int = 40, batch_size: int = 
 
 
 @app.local_entrypoint()
-def train(stage: str, max_steps: int, gpu: str = "H100", time_limit_min: float = 0, overrides: str = "", cpu: int = 0):
+def train(stage: str, max_steps: int, gpu: str = "H100", time_limit_min: float = 0, overrides: str = "", cpu: int = 0,
+          which: str = "full_256"):
     """``--cpu N`` gives the container N cores and N - 1 DataLoader workers (the warp stage is CPU-bound)."""
     if stage not in ("warp", "texture"):
         raise SystemExit("--stage must be warp or texture")
@@ -316,17 +340,23 @@ def train(stage: str, max_steps: int, gpu: str = "H100", time_limit_min: float =
         opts["cpu"] = float(cpu)
         overrides = ";".join(o for o in (overrides, f"data.num_workers={cpu - 1}") if o)
     fn = train_stage.with_options(**opts)
-    print(json.dumps(fn.remote(stage, max_steps, time_limit_min, "modal_full_256.yaml", overrides), indent=1))
+    print(json.dumps(fn.remote(stage, max_steps, time_limit_min, CONFIGS[which], overrides), indent=1))
 
 
 @app.local_entrypoint()
-def benchmark(which: str = "full_256", limit: int = 0, gpu: str = "L4", pairs_from: str = "", tag: str = ""):
-    print(run_benchmark.with_options(gpu=GPU_ALIASES.get(gpu, gpu)).remote(which, limit, pairs_from, tag))
+def benchmark(which: str = "full_256", limit: int = 0, gpu: str = "L4", pairs_from: str = "", tag: str = "",
+              overrides: str = ""):
+    print(run_benchmark.with_options(gpu=GPU_ALIASES.get(gpu, gpu)).remote(which, limit, pairs_from, tag, overrides))
 
 
 @app.local_entrypoint()
-def layout_eval(which: str = "full_256"):
-    run_layout_eval.remote(which)
+def layout_eval(which: str = "full_256", overrides: str = ""):
+    run_layout_eval.remote(which, overrides)
+
+
+@app.local_entrypoint()
+def densepose(allow_download: bool = False):
+    print(json.dumps(add_densepose_maps.remote("dfmm", allow_download), indent=1))
 
 
 @app.local_entrypoint()

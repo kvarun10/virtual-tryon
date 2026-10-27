@@ -271,3 +271,52 @@ def build_pack(img_zip: Path, partition_file: Path, parsing_zip: Optional[Path],
         shutil.rmtree(out_dir)
     tmp.rename(out_dir)
     return report
+
+
+def add_densepose(store_dir: Path, densepose_zip: Path, source: str = "dfmm", body_label_set: str = "body15",
+                  part_channel: int = 2, progress: bool = True) -> Dict:
+    """Add DensePose body maps to an existing store as blob ``body_dp`` (same row order; empty = none).
+
+    ``source="dfmm"``: DeepFashion-MultiModal ``densepose.zip`` (``<stem>_densepose.png``, 750 x 1101, part index in
+    channel ``part_channel``), letterboxed to the store size with nearest neighbour exactly like the parsing.
+    ``source="inshop"``: In-shop ``img_iuv.zip`` (``img/.../<file>_IUV.png``, already 256 x 256, I in channel 2).
+    Part indices are converted from the 25-label DensePose set to ``body_label_set``.
+    """
+    store_dir = Path(store_dir)
+    meta = json.loads((store_dir / "meta.json").read_text(encoding="utf-8"))
+    names = [r["name"] for r in json.loads((store_dir / "names.json").read_text(encoding="utf-8"))]
+    size = tuple(meta["size"])
+    with zipfile.ZipFile(densepose_zip) as z:
+        members = {}
+        for m in z.namelist():
+            if source == "dfmm" and m.endswith("_densepose.png"):
+                members[Path(m).name[: -len("_densepose.png")]] = m
+            elif source == "inshop" and m.endswith("_IUV.png"):
+                members[inshop_to_dfmm_stem(m[: -len("_IUV.png")] + ".jpg")] = m
+        w = BlobWriter(store_dir / "body_dp")
+        found, bad = 0, []
+        it = names
+        if progress:
+            from tqdm.auto import tqdm
+
+            it = tqdm(names, desc=f"DensePose ({source})")
+        for n in it:
+            m = members.get(n)
+            if m is None:
+                w.append(b"")
+                continue
+            a = np.asarray(Image.open(io.BytesIO(z.read(m))))
+            if a.ndim != 3 or a.shape[2] <= part_channel:
+                bad.append(m)
+                w.append(b"")
+                continue
+            parts = convert_labels(a[:, :, part_channel].astype(np.uint8), "densepose", body_label_set)
+            if parts.shape != size:
+                parts = resize_labels(parts, size, "letterbox")[0]
+            w.append(encode_png(parts))
+            found += 1
+    w.close()
+    meta["body_dp"] = {"source": f"{source}: {Path(densepose_zip).name}", "label_set": body_label_set,
+                       "photos_with_map": found, "photos": len(names), "unreadable": len(bad)}
+    (store_dir / "meta.json").write_text(json.dumps(meta, indent=1, default=str), encoding="utf-8")
+    return meta["body_dp"]

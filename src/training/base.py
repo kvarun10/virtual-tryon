@@ -93,6 +93,33 @@ class GANTrainer:
                 f"device {self.device}, amp {self.use_amp}")
 
     # ------------------------------------------------------------------ checkpointing
+    # ------------------------------------------------------------------ fine-tuning helpers
+    def init_weights(self, path: Path) -> None:
+        """Start a new run from another run's weights (``training.<stage>_init_from``): generator, its EMA and the
+        discriminator; optimisers, step and RNG start fresh. The model signature must match."""
+        st = self.ckpt.load(path, signature=None, map_location="cpu")
+        if st is None:
+            raise FileNotFoundError(f"training.{self.stage}_init_from: no checkpoint at {path}")
+        if st.get("signature", {}).get("generator") != self.signature.get("generator"):
+            raise ValueError(f"training.{self.stage}_init_from {path}: generator architecture differs from this config")
+        self.gen.load_state_dict(st["gen"])
+        self.disc.load_state_dict(st["disc"])
+        if self.ema is not None:
+            src = st.get("gen_ema", st["gen"])
+            self.ema = {k: v.to(self.ema[k].device).clone() for k, v in src.items()}
+        self._print(f"initialised from {path} (its step {st.get('step')}); new run starts at step 0")
+
+    def set_lr(self, total: int) -> None:
+        """Linear decay to 0 between ``training.lr_decay_from`` and the last step (both optimisers)."""
+        start = self.t.lr_decay_from
+        if start < 0 or total <= start:
+            return
+        frac = min(1.0, max(0.0, (self.step + 1 - start) / (total - start)))  # step + 1 = the update about to happen
+        for opt in (self.opt_g, self.opt_d):
+            for g in opt.param_groups:
+                g.setdefault("base_lr", g["lr"])
+                g["lr"] = g["base_lr"] * (1.0 - frac)
+
     # ------------------------------------------------------------------ EMA
     @torch.no_grad()
     def update_ema(self) -> None:
@@ -208,8 +235,10 @@ class GANTrainer:
         """Train until ``max_steps`` (or epochs). ``time_limit_min``: stop cleanly (validate + save) once this
         much wall-clock time has passed, so a Colab session keeps time for evaluation; re-run to continue."""
         ensure_not_frozen(self.ckpt.dir)  # never train into the frozen baseline
-        if resume:
-            self.resume()
+        resumed = self.resume() if resume else False
+        init_from = getattr(self.t, f"{self.stage}_init_from", "")
+        if not resumed and init_from:
+            self.init_weights(Path(init_from))
         t_start = time.time()
         stopped_by = "max_steps"
         max_steps = max_steps or self.t.max_steps
@@ -231,6 +260,7 @@ class GANTrainer:
                 if len(acc_losses) < accum:
                     continue
                 adv = self.adv_active()
+                self.set_lr(total)
                 gnorm = self.optimizer_step(adv)
                 self.step += 1
                 self.update_ema()

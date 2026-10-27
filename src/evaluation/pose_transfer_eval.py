@@ -132,6 +132,29 @@ def inshop_loader(store) -> Callable[[str], np.ndarray]:
     return lambda stem: np.ascontiguousarray(store.image(stem)[:, a:b])
 
 
+class PackedBodyBackend:
+    """Body maps for benchmark targets read from the packed store (e.g. DensePose, ``data.body_source=densepose``),
+    cropped like :func:`inshop_loader` so they align with the loaded photo."""
+
+    role = "body"
+
+    def __init__(self, store, label_set: str):
+        self.store, self.label_set = store, label_set
+        self.name = f"packed_{store.body_source}"
+
+    def predict(self, image: np.ndarray, key: Optional[str] = None):
+        from src.models.segmentation import SegmentationResult
+
+        a, b = INSHOP_CONTENT_COLS
+        labels = np.ascontiguousarray(self.store.body(key)[:, a:b])
+        if labels.shape != image.shape[:2]:
+            raise ValueError(f"{key}: body map {labels.shape} vs photo {image.shape[:2]}")
+        return SegmentationResult(labels, self.label_set, self.name, "body")
+
+    def describe(self) -> Dict:
+        return {"name": self.name, "label_set": self.label_set}
+
+
 def format_pose_transfer(res: Dict, leak: Dict) -> str:
     L = ["# Paper-style pose-transfer benchmark (standard DeepFashion test pairs, whole 176 x 256 images)", "",
          f"Standard test pairs: {leak['standard_test_pairs']}; by leakage category: {leak['pairs_by_category']}.",

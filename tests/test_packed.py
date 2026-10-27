@@ -228,3 +228,102 @@ def test_layout_eval_all_definitions(pack, tmp_path):
     gt = res["final_layout_gt_identity"]["per_class_iou"]
     assert gt["face"] == 1.0  # face labels copied from the manual parse match it exactly
     assert "mIoU incl. background" in format_layouts(res)
+
+
+# ---------------------------------------------------------------- v2 additions: DensePose, contextual, fine-tuning
+def _dp_zip(tmp_path, names, skip=()):
+    z = tmp_path / "densepose.zip"
+    with zipfile.ZipFile(z, "w") as zf:
+        for k, n in enumerate(names):
+            if n in skip:
+                continue
+            a = np.zeros((1101, 750, 3), np.uint8)
+            a[200:900, 200:550, 2] = 2  # DensePose part index (torso) in channel 2
+            a[900:1050, 250:350, 2] = 7  # a leg part
+            b = io.BytesIO()
+            Image.fromarray(a).save(b, "PNG")
+            zf.writestr(f"densepose/{n}_densepose.png", b.getvalue())
+    return z
+
+
+@pytest.fixture(scope="module")
+def pack_dp(pack, tmp_path_factory):
+    import shutil
+
+    from src.data.packing import add_densepose
+
+    tmp = tmp_path_factory.mktemp("dp")
+    d = tmp / "pack256"
+    shutil.copytree(pack[0], d)
+    missing = {pack[2][1]}
+    info = add_densepose(d, _dp_zip(tmp, pack[2], skip=missing), "dfmm", "body15", progress=False)
+    return d, info, missing
+
+
+def test_add_densepose_and_body_source(pack_dp):
+    d, info, missing = pack_dp
+    assert info["photos_with_map"] == 15 and info["photos"] == 16
+    st = PackedStore(d, body_source="densepose")
+    name = next(n for n in st.index if n not in missing)
+    b = st.body(name)
+    assert b.shape == (256, 256) and set(np.unique(b)) - {0} and b.max() < 15
+    assert not st.has_body(next(iter(missing))) and st.has_body(name)
+    assert PackedStore(d).has_body(next(iter(missing)))  # schp maps exist for every photo
+    with pytest.raises(Exception):
+        PackedStore(pack_dp[0].parent.parent / "nope", body_source="densepose")
+
+
+def test_warp_with_densepose_skips_photos_without_maps(pack_dp, tmp_path):
+    d, _, missing = pack_dp
+    cfg = _cfg(tmp_path, d, "data.body_source=densepose", "labels.body_label_set=body15")
+    prep = load_packed(cfg)
+    ds = WarpTripletDataset(prep, "train", cfg, train=True)
+    assert not ({r.name for r in ds.records} & missing) or len(ds.records) == len(prep.records("train"))
+    assert ds[0]["body"].shape[0] == 15
+    WarpTrainer(cfg, prep, verbose=False).fit(max_steps=1, resume=False)
+
+
+def test_packed_body_backend_crops_like_the_photo(pack_dp):
+    from src.evaluation.pose_transfer_eval import PackedBodyBackend
+
+    d, _, missing = pack_dp
+    st = PackedStore(d, body_source="densepose")
+    name = next(n for n in st.index if n not in missing)
+    res = PackedBodyBackend(st, "body15").predict(inshop_loader(st)(name), key=name)
+    assert res.labels.shape == (256, 174)
+
+
+def test_contextual_loss_properties():
+    from src.training.losses import contextual_loss
+
+    torch.manual_seed(0)
+    y = torch.randn(2, 8, 6, 6)
+    perm = y.flatten(2)[:, :, torch.randperm(36)].view_as(y)
+    same, shuffled, other = contextual_loss(y, y), contextual_loss(perm, y), contextual_loss(torch.randn(2, 8, 6, 6), y)
+    assert same < 0.05 and shuffled < 0.05  # position-independent: a shuffled copy still matches
+    assert other > same + 0.3
+    x = torch.randn(2, 8, 6, 6, requires_grad=True)
+    contextual_loss(x, y).backward()
+    assert torch.isfinite(x.grad).all()
+
+
+def test_texture_finetune_init_from_lr_decay_and_context(pack, tmp_path):
+    cfg0 = _cfg(tmp_path, pack[0], "training.ema_decay=0.9")
+    prep = load_packed(cfg0)
+    base = TextureTrainer(cfg0, prep, verbose=False)
+    base.fit(max_steps=2, resume=False)
+    src = base.ckpt.last
+    cfg = _cfg(tmp_path, pack[0], "training.ema_decay=0.9", "training.texture_run_name=texture_ft",
+               f"training.texture_init_from={src.as_posix()}", "training.lr_decay_from=0", "training.lambda_tex_l1=5",
+               "training.lambda_tex_context=1")
+    ft = TextureTrainer(cfg, prep, verbose=False)
+    st0 = torch.load(src, map_location="cpu", weights_only=True)
+    out = ft.fit(max_steps=3, resume=True)
+    assert out["step"] == 3 and ft.ckpt.dir.name == "texture_ft"
+    assert all(g["lr"] == 0.0 for g in ft.opt_g.param_groups)  # decayed to 0 at the last step
+    assert all(np.isfinite(h["context"]) and h["context"] > 0 and h["l1"] > 0 for h in ft.history)
+    k = next(n for n, _ in ft.gen.named_parameters())
+    assert not torch.equal(ft.gen.state_dict()[k].cpu(), torch.zeros_like(st0["gen"][k]))
+    # a second call resumes the fine-tune run itself (not init_from again)
+    ft2 = TextureTrainer(cfg, prep, verbose=False)
+    assert ft2.resume() and ft2.step == 3
