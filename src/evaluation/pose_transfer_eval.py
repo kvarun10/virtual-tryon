@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 import torch
@@ -44,7 +44,9 @@ def evaluate_pose_transfer(models: TryOnModels, cfg: ProjectConfig, pairs: Seque
                            categories: Dict[Tuple[str, str], str], image_dir: Path,
                            lpips_metric: Optional[LPIPSMetric] = None, features: Optional[InceptionFeatures] = None,
                            limit: Optional[int] = None, clothing=None, body=None, grid_path: Optional[Path] = None,
-                           grid_rows: int = 8, progress: bool = True) -> Dict:
+                           grid_rows: int = 8, progress: bool = True,
+                           load: Optional[Callable[[str], np.ndarray]] = None) -> Dict:
+    """``load(stem) -> RGB uint8`` replaces reading ``image_dir/<stem>.jpg`` (e.g. :func:`inshop_loader`)."""
     from src.evaluation.final_eval import _features, _fid_kid
 
     G = get_label_set(cfg.labels.garment_label_set)
@@ -58,7 +60,7 @@ def evaluate_pose_transfer(models: TryOnModels, cfg: ProjectConfig, pairs: Seque
 
     def stage_a(stem: str):
         if stem not in memo:
-            img = load_image(image_dir / f"{stem}.jpg")
+            img = load(stem) if load is not None else load_image(image_dir / f"{stem}.jpg")
             memo[stem] = (img, to_project_labels(clothing.predict(img, key=stem), G.name))
             if len(memo) > 64:  # bounded cache
                 memo.pop(next(iter(memo)))
@@ -118,6 +120,16 @@ def evaluate_pose_transfer(models: TryOnModels, cfg: ProjectConfig, pairs: Seque
         res["grid"] = str(grid_path)
         res["grid_columns"] = "reference (copy) | real target | ours raw | ours + face/hair paste"
     return res
+
+
+INSHOP_CONTENT_COLS = (41, 215)  # In-shop 256 x 256 photos = DFMM photo letterboxed to 174 x 256 at column 41
+
+
+def inshop_loader(store) -> Callable[[str], np.ndarray]:
+    """Photos from the packed In-shop store, cropped to their 174 x 256 content (same aspect as a DFMM photo), so the
+    protocol frame and model input are built exactly as for DFMM photos."""
+    a, b = INSHOP_CONTENT_COLS
+    return lambda stem: np.ascontiguousarray(store.image(stem)[:, a:b])
 
 
 def format_pose_transfer(res: Dict, leak: Dict) -> str:

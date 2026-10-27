@@ -41,6 +41,7 @@ class TextureDataset(Dataset):
             raise ValueError(f"No annotated images in split '{split}'")
         self.cfg, self.train = cfg, train
         self.root = prepared.index.root
+        self.store = getattr(prepared, "store", None)  # packed 256 px store (src/data/packed.py) or None
         self.size = tuple(cfg.data.image_size)
         self.mode = cfg.data.resize_mode
         self.pad = cfg.data.pad_value_image
@@ -69,8 +70,13 @@ class TextureDataset(Dataset):
         return sum(1 for s in self.siblings.values() if s)
 
     def _load(self, rec):
-        raw = load_image(self.root / rec.image)
-        lab = convert_labels(load_label_map(self.root / rec.parsing), "dfmm", self.G.name)
+        if self.store is not None:
+            raw, lab = self.store.image(rec.name), self.store.garment(rec.name)
+            if raw.shape[:2] == self.size and lab.shape == self.size:
+                return raw, lab
+        else:
+            raw = load_image(self.root / rec.image)
+            lab = convert_labels(load_label_map(self.root / rec.parsing), "dfmm", self.G.name)
         if lab.shape != raw.shape[:2]:
             raise ValueError(f"{rec.name}: parsing size {lab.shape} != image size {raw.shape[:2]}")
         return resize_image(raw, self.size, self.mode, self.pad)[0], resize_labels(lab, self.size, self.mode)[0]

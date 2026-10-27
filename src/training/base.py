@@ -10,6 +10,9 @@ else is shared:
 * exact resume, including the position inside an epoch and the RNG states (checkpoints are loaded on CPU)
 * validation every ``val_every`` steps; ``best.pt`` keeps the best ``score_key``; optional early stopping
 * JSONL log at ``logs/<experiment>/<stage>_train.jsonl``
+* optional EMA of the generator (``training.ema_decay``): parameters averaged after every optimiser step, buffers
+  (e.g. spectral-norm vectors) copied; validation and saved ``gen_ema`` use it, inference prefers ``gen_ema``
+* optional ``fast_math`` (TF32 + cudnn.benchmark) and an ``on_save`` callback (e.g. commit a cloud volume)
 
 Checkpoint keys are unchanged from the original warp trainer, so existing warp checkpoints still load.
 """
@@ -19,6 +22,7 @@ from __future__ import annotations
 import json
 import math
 import time
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Dict, Optional
 
@@ -27,7 +31,8 @@ import torch
 from torch.utils.data import DataLoader
 
 from src.config import ProjectConfig
-from src.data.dataset import PreparedData, prepare_dataset
+from src.data.dataset import PreparedData
+from src.data.packed import prepare_any
 from src.training.checkpointing import CheckpointManager, ensure_not_frozen, rng_state, set_rng_state
 from src.utils.device import select_device
 from src.utils.logging import JsonlLogger
@@ -46,8 +51,17 @@ class GANTrainer:
         self.verbose = verbose
         seed_everything(cfg.experiment.seed, cfg.experiment.deterministic)
         self.device = device or select_device(cfg.experiment.device)
-        self.prepared = prepared or prepare_dataset(cfg)
+        if self.t.fast_math and self.device.type == "cuda":
+            torch.backends.cuda.matmul.allow_tf32 = True
+            torch.backends.cudnn.allow_tf32 = True
+            torch.backends.cudnn.benchmark = True
+        self.prepared = prepared or prepare_any(cfg)
         self.build(**build_kwargs)
+        self.on_save = None  # optional callable run after every checkpoint save
+        self.ema = None
+        if self.t.ema_decay > 0:
+            self.ema = {k: v.detach().clone() for k, v in self.gen.state_dict().items()}
+            self._ema_params = [n for n, _ in self.gen.named_parameters()]
         self.use_amp = bool(self.t.amp and self.device.type == "cuda")
         self.scaler = torch.amp.GradScaler("cuda", enabled=self.use_amp)
         paths = ProjectPaths.from_config(cfg)
@@ -79,8 +93,39 @@ class GANTrainer:
                 f"device {self.device}, amp {self.use_amp}")
 
     # ------------------------------------------------------------------ checkpointing
+    # ------------------------------------------------------------------ EMA
+    @torch.no_grad()
+    def update_ema(self) -> None:
+        if self.ema is None:
+            return
+        decay = min(self.t.ema_decay, (1 + self.step) / (10 + self.step))  # warm-up: early weights forgotten fast
+        live = self.gen.state_dict()
+        params = set(self._ema_params)
+        avg = [k for k in live if k in params and live[k].dtype.is_floating_point]
+        torch._foreach_lerp_([self.ema[k] for k in avg], [live[k].detach() for k in avg], 1.0 - decay)
+        for k, v in live.items():
+            if k not in params or not v.dtype.is_floating_point:
+                self.ema[k].copy_(v)
+
+    @contextmanager
+    def ema_weights(self):
+        """Temporarily run the generator with its EMA weights (no-op without EMA)."""
+        if self.ema is None:
+            yield
+            return
+        backup = {k: v.detach().clone() for k, v in self.gen.state_dict().items()}
+        self.gen.load_state_dict(self.ema)
+        try:
+            yield
+        finally:
+            self.gen.load_state_dict(backup)
+
+    def _validate(self, **kw) -> Dict:
+        with self.ema_weights():
+            return self.validate(**kw)
+
     def state(self) -> Dict:
-        return {"gen": self.gen.state_dict(), "disc": self.disc.state_dict(), "opt_g": self.opt_g.state_dict(),
+        return {"gen": self.gen.state_dict(), **({"gen_ema": self.ema} if self.ema is not None else {}), "disc": self.disc.state_dict(), "opt_g": self.opt_g.state_dict(),
                 "opt_d": self.opt_d.state_dict(), "scaler": self.scaler.state_dict(), "step": self.step,
                 "epoch": self.epoch, "batch_in_epoch": self.batch_in_epoch, "best": self.best,
                 "bad_evals": self.bad_evals, "rng": rng_state(), "signature": self.signature,
@@ -88,6 +133,8 @@ class GANTrainer:
 
     def save(self, is_best: bool = False) -> None:
         self.ckpt.save(self.state(), self.step, is_best=is_best)
+        if self.on_save is not None:
+            self.on_save()
 
     def resume(self, path: Optional[Path] = None) -> bool:
         # Load on CPU: load_state_dict copies weights to the model's device and Adam moves its own state.
@@ -96,6 +143,9 @@ class GANTrainer:
         if st is None:
             return False
         self.gen.load_state_dict(st["gen"])
+        if self.ema is not None:
+            src = st.get("gen_ema", st["gen"])
+            self.ema = {k: v.to(self.ema[k].device).clone() for k, v in src.items()}
         self.disc.load_state_dict(st["disc"])
         self.opt_g.load_state_dict(st["opt_g"])
         self.opt_d.load_state_dict(st["opt_d"])
@@ -115,9 +165,10 @@ class GANTrainer:
         st = self.ckpt.load(path, signature=self.signature, map_location="cpu")
         if st is None:
             raise FileNotFoundError(f"No checkpoint at {path}")
-        self.gen.load_state_dict(st["gen"])
+        self.gen.load_state_dict(st.get("gen_ema", st["gen"]))
         self.step = st["step"]
         metrics = self.validate(max_batches=0, kind=f"eval_{Path(path).stem}")
+        metrics["weights"] = "ema" if "gen_ema" in st else "live"
         metrics["checkpoint"] = str(path)
         return metrics
 
@@ -182,6 +233,7 @@ class GANTrainer:
                 adv = self.adv_active()
                 gnorm = self.optimizer_step(adv)
                 self.step += 1
+                self.update_ema()
                 n_steps += 1
                 rec = {k: float(np.mean([l[k] for l in acc_losses])) for k in acc_losses[0]}
                 rec.update(step=self.step, epoch=self.epoch, grad_norm=gnorm, adv=adv)
@@ -193,7 +245,7 @@ class GANTrainer:
                     self._print(f"step {self.step}/{total} {losses} ({(time.time() - t0) / n_steps:.2f}s/step)")
                 is_best = False
                 if self.step % self.t.val_every == 0 or self.step == total:
-                    score = self.validate()[self.score_key]
+                    score = self._validate()[self.score_key]
                     is_best = score > self.best
                     if is_best:
                         self.best, self.bad_evals = score, 0
@@ -213,7 +265,7 @@ class GANTrainer:
                 if time_limit_min is not None and (time.time() - t_start) / 60 >= time_limit_min:
                     self._print(f"time budget of {time_limit_min:.0f} min reached at step {self.step}; "
                                 "validating and saving. Re-run with the same settings to continue.")
-                    self.validate()
+                    self._validate()
                     stopped_by = "time_limit"
                     stop = True
                     break

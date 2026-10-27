@@ -111,8 +111,13 @@ class WarpTripletDataset(Dataset):
         self.size = tuple(cfg.data.image_size)
         self.mode = cfg.data.resize_mode
         self.G = get_label_set(cfg.labels.garment_label_set)
-        self.body = body_source or BodyMapSource(cfg, self.root)
-        self.Kb = self.body.num_classes
+        self.store = getattr(prepared, "store", None)  # packed 256 px store (src/data/packed.py) or None
+        if self.store is not None:
+            self.body = None
+            self.Kb = get_label_set(cfg.labels.body_label_set).num_classes
+        else:
+            self.body = body_source or BodyMapSource(cfg, self.root)
+            self.Kb = self.body.num_classes
         self.transfer = cfg.labels.transfer_classes
         supervised = set(self.transfer) | {"background", "skin"}
         self.ignore_ids = [i for i, n in enumerate(self.G.names) if n not in supervised]
@@ -136,11 +141,18 @@ class WarpTripletDataset(Dataset):
     def n_cross_view_available(self) -> int:
         return sum(1 for s in self.siblings.values() if s)
 
+    def _fit(self, lab: np.ndarray) -> np.ndarray:
+        return lab if lab.shape == self.size else resize_labels(lab, self.size, self.mode)[0]
+
     def _garment(self, rec) -> np.ndarray:
+        if self.store is not None:
+            return self._fit(self.store.garment(rec.name))
         g = convert_labels(load_label_map(self.root / rec.parsing), "dfmm", self.G.name)
         return resize_labels(g, self.size, self.mode)[0]
 
     def _body(self, rec) -> np.ndarray:
+        if self.store is not None:
+            return self._fit(self.store.body(rec.name))
         return resize_labels(self.body.load(rec), self.size, self.mode)[0]
 
     def _rng(self, i: int) -> np.random.Generator:

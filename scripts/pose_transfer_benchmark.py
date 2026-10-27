@@ -34,7 +34,8 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--config", default="configs/colab_pairfilter.yaml")
     ap.add_argument("--drive-root", required=True)
-    ap.add_argument("--image-dir", required=True, type=Path, help="folder with the DFMM .jpg photos")
+    ap.add_argument("--image-dir", type=Path, help="folder with the DFMM .jpg photos")
+    ap.add_argument("--packed-dir", type=Path, help="read the photos from the packed In-shop store instead (Modal runs)")
     ap.add_argument("--pairs-dir", type=Path, help="default <drive>/datasets/pose_transfer_pairs")
     ap.add_argument("--allow-pair-download", action="store_true")
     ap.add_argument("--leakage-only", action="store_true")
@@ -47,7 +48,16 @@ def main(argv=None) -> int:
     paths = ProjectPaths.from_config(cfg)
     files = ensure_pair_files(a.pairs_dir or paths.datasets / "pose_transfer_pairs", a.allow_pair_download)
     test_pairs, train_pairs = read_pairs(files["test"]), read_pairs(files["train"])
-    available = {p.stem for p in a.image_dir.iterdir() if p.suffix.lower() == ".jpg"}
+    if a.packed_dir:
+        from src.data.packed import PackedStore
+        from src.evaluation.pose_transfer_eval import inshop_loader
+
+        store = PackedStore(a.packed_dir)
+        available, load = set(store.index), inshop_loader(store)
+    elif a.image_dir:
+        available, load = {p.stem for p in a.image_dir.iterdir() if p.suffix.lower() == ".jpg"}, None
+    else:
+        ap.error("give --image-dir or --packed-dir")
     splits = load_split_names(Path(cfg.data.split_file))
     leak = leakage_report(test_pairs, train_pairs, splits, available)
     out = a.out or paths.outputs / cfg.experiment.name / "pose_transfer" / dt.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -69,8 +79,9 @@ def main(argv=None) -> int:
     w, allow = metric_weights_dir(cfg), cfg.evaluation.allow_metric_download
     res = evaluate_pose_transfer(models, cfg, test_pairs, categorise_pairs(test_pairs, splits, available), a.image_dir,
                                  LPIPSMetric(models.device, w, allow), InceptionFeatures(models.device, w, allow),
-                                 limit=a.limit, grid_path=out / "grid.png")
-    res.update({"checkpoints": models.info, "limit": a.limit, "official": a.limit is None})
+                                 limit=a.limit, grid_path=out / "grid.png", load=load)
+    res.update({"checkpoints": models.info, "limit": a.limit, "official": a.limit is None,
+                "image_source": "packed In-shop store" if a.packed_dir else "DFMM photos", "split_file": cfg.data.split_file})
     (out / "results.json").write_text(json.dumps(res, indent=1, default=str), encoding="utf-8")
     text = format_pose_transfer(res, leak)
     (out / "results.md").write_text(text, encoding="utf-8")

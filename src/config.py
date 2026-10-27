@@ -106,6 +106,9 @@ class DataConfig:
     pair_color_metric: str = "max"  # max | weighted (area-weighted dE, robust to small regions such as shoes)
     image_check: str = "header"  # none | header | full  (full decodes every image)
     num_workers: int = 2
+    # Packed store (src/data/packed.py): pre-resized In-shop photos + label maps in a few files. "" = off (DFMM files).
+    packed_dir: str = ""
+    label_source: str = "manual_then_auto"  # packed only: manual | manual_then_auto (SCHP labels where no manual)
 
 
 @dataclass
@@ -181,6 +184,8 @@ class TrainingConfig:  # warp fields used from Phase 4; texture fields reserved 
     lambda_tex_l1: float = 0.0  # plain pixel L1 to ground truth (off by default)
     texture_vgg_init: str = "imagenet"  # imagenet | random (random only for offline tests)
     allow_vgg_download: bool = False  # torchvision VGG-19 ImageNet weights (~548 MB), cached in pretrained/torch
+    ema_decay: float = 0.0  # >0: keep an exponential moving average of the generator; used for validation/inference
+    fast_math: bool = False  # TF32 matmul/conv + cudnn.benchmark (Ampere and newer; numerics change slightly)
     checkpoint_every: int = 500
     log_every: int = 50
     val_every: int = 1000
@@ -349,7 +354,7 @@ def _resolve_placeholders(cfg: ProjectConfig) -> None:
     for f in dataclasses.fields(cfg.paths):
         setattr(cfg.paths, f.name, fmt(getattr(cfg.paths, f.name)))
     refresh_names()
-    for attr in ("root", "archive_dir", "split_file", "index_file", "pair_table"):
+    for attr in ("root", "archive_dir", "split_file", "index_file", "pair_table", "packed_dir"):
         setattr(cfg.data, attr, fmt(getattr(cfg.data, attr)))
     for attr in ("body_maps_local", "body_maps_archive"):
         setattr(cfg.segmentation, attr, fmt(getattr(cfg.segmentation, attr)))
@@ -379,6 +384,10 @@ def validate_config(cfg: ProjectConfig) -> None:
         raise ConfigError("data.pair_filter must be none|classes|classes_color|same_seq")
     if data.pair_color_metric not in {"max", "weighted"}:
         raise ConfigError("data.pair_color_metric must be max|weighted")
+    if data.label_source not in {"manual", "manual_then_auto"}:
+        raise ConfigError("data.label_source must be manual|manual_then_auto")
+    if not 0.0 <= cfg.training.ema_decay < 1.0:
+        raise ConfigError("training.ema_decay must be in [0, 1)")
     if data.image_check not in {"none", "header", "full"}:
         raise ConfigError("data.image_check must be none|header|full")
     ratios = data.split_ratios

@@ -148,7 +148,7 @@ def export_generator(path: Path, out: Path = None) -> Path:
     path = Path(path)
     st = torch.load(path, map_location="cpu", weights_only=True)
     out = Path(out) if out else path.with_name("generator_only.pt")
-    atomic_save({"gen": st["gen"], "signature": st.get("signature", {}), "step": st["step"],
+    atomic_save({"gen": st.get("gen_ema", st["gen"]), "signature": st.get("signature", {}), "step": st["step"],
                  "metric_version": st.get("metric_version"), "config": st.get("config")}, out)
     return out
 
