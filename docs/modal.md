@@ -131,6 +131,8 @@ region or FID sample size; ADGAN/DiOr are scored on all 8,570 pairs; FID depends
 | pixel accuracy | 97.2 | **98.0** | 98.9 |
 | final layout (warp + automatic face/hair), all 12 classes incl. background | 62.1 | 66.2 | |
 
+**Correction (2026-10-27):** the paper's Table 2 (mIoU 87.6 / Acc 98.9) is a *label-to-image* score (SPADE protocol: a parser is run on images generated from a given layout and compared with that layout; docs/paper_analysis.md 2.6). It does not measure the warp stage, so the warp mIoU above must not be compared with it. The comparable test would run SCHP on texture outputs generated from ground-truth layouts.
+
 The final-layout definition counts headwear and accessories, which the method never transfers (IoU 0), so it is lower.
 Per-class IoU (full_256, training metric): pants 0.85, dress 0.84, top 0.82, skirt 0.80, skin 0.75, outer 0.71,
 footwear 0.67. Files: report/data/layout_eval_*_20261027.md, pose_transfer_*_20261027.md, pack256_report_20261027.json.
