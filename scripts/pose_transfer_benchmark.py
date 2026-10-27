@@ -39,6 +39,8 @@ def main(argv=None) -> int:
     ap.add_argument("--pairs-dir", type=Path, help="default <drive>/datasets/pose_transfer_pairs")
     ap.add_argument("--allow-pair-download", action="store_true")
     ap.add_argument("--leakage-only", action="store_true")
+    ap.add_argument("--pairs-from", type=Path, help="score only the pairs listed in another run's results.json "
+                    "(same-pair comparison; pairs that are not scorable for this model are still skipped)")
     ap.add_argument("--limit", type=int, help="score only the first N scorable pairs (quick check, not reported)")
     ap.add_argument("--out", type=Path)
     ap.add_argument("--override", action="append", default=[])
@@ -48,6 +50,10 @@ def main(argv=None) -> int:
     paths = ProjectPaths.from_config(cfg)
     files = ensure_pair_files(a.pairs_dir or paths.datasets / "pose_transfer_pairs", a.allow_pair_download)
     test_pairs, train_pairs = read_pairs(files["test"]), read_pairs(files["train"])
+    if a.pairs_from:
+        keep = {tuple(p) for p in json.loads(a.pairs_from.read_text(encoding="utf-8"))["per_pair"]["pairs"]}
+        test_pairs = [p for p in test_pairs if p in keep]
+        print(f"--pairs-from: {len(test_pairs)} pairs kept from {a.pairs_from}")
     if a.packed_dir:
         from src.data.packed import PackedStore
         from src.evaluation.pose_transfer_eval import inshop_loader
@@ -80,7 +86,8 @@ def main(argv=None) -> int:
     res = evaluate_pose_transfer(models, cfg, test_pairs, categorise_pairs(test_pairs, splits, available), a.image_dir,
                                  LPIPSMetric(models.device, w, allow), InceptionFeatures(models.device, w, allow),
                                  limit=a.limit, grid_path=out / "grid.png", load=load)
-    res.update({"checkpoints": models.info, "limit": a.limit, "official": a.limit is None,
+    res.update({"checkpoints": models.info, "limit": a.limit, "official": a.limit is None and not a.pairs_from,
+                "pairs_from": str(a.pairs_from) if a.pairs_from else None,
                 "image_source": "packed In-shop store" if a.packed_dir else "DFMM photos", "split_file": cfg.data.split_file})
     (out / "results.json").write_text(json.dumps(res, indent=1, default=str), encoding="utf-8")
     text = format_pose_transfer(res, leak)
