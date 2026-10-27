@@ -75,3 +75,18 @@ def test_benchmark_runs_on_fixture(trained, tmp_path):
     assert len(res["per_pair"]["ssim_raw"]) == res["pairs_scored"]
     leak = {"standard_test_pairs": 3, "pairs_by_category": {}}
     assert "ours, raw output" in format_pose_transfer(res, leak)
+
+
+def test_benchmark_runs_with_a_loader_and_no_image_dir(trained):
+    """Modal path: photos come from a loader (packed In-shop store), image_dir is None."""
+    from src.data.preprocessing import load_image
+
+    cfg, prepared, models = trained
+    by_item = {}
+    for r in prepared.records("train"):
+        by_item.setdefault(r.item_id, []).append(r)
+    pairs = [(v[0].name, v[1].name) for v in by_item.values() if len(v) >= 2][:2]
+    paths = {r.name: prepared.index.root / r.image for r in prepared.records("train")}
+    res = evaluate_pose_transfer(models, cfg, pairs, {p: "clean_unseen" for p in pairs}, None, progress=False,
+                                 load=lambda stem: load_image(paths[stem]))
+    assert res["pairs_scored"] == 2 and np.isfinite(res["ssim_raw"])

@@ -55,7 +55,7 @@ def evaluate_pose_transfer(models: TryOnModels, cfg: ProjectConfig, pairs: Seque
     todo = [p for p in pairs if categories.get(p) in SCORED][: limit or None]
     if not todo:
         raise ValueError("No scorable pairs (all leaked, locked or missing)")
-    image_dir = Path(image_dir)
+    image_dir = Path(image_dir) if image_dir is not None else None  # None: photos come from `load`
     memo: Dict[str, Tuple[np.ndarray, np.ndarray]] = {}
 
     def stage_a(stem: str):
