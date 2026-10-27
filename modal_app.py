@@ -59,11 +59,11 @@ def _code():
         sys.path.insert(0, CODE)
 
 
-def _stage_pack() -> str:
+def _stage_pack(source: str = PACK) -> str:
     """Copy the packed store to local disk (fast random reads for DataLoader workers)."""
     if not Path(LOCAL_PACK, "meta.json").is_file():
         t = time.time()
-        shutil.copytree(PACK, LOCAL_PACK + ".part", dirs_exist_ok=True)
+        shutil.copytree(source, LOCAL_PACK + ".part", dirs_exist_ok=True)
         os.replace(LOCAL_PACK + ".part", LOCAL_PACK)
         print(f"packed store copied to local disk in {time.time() - t:.0f}s", flush=True)
     return LOCAL_PACK
@@ -151,18 +151,18 @@ def _trainer(stage: str, cfg):
 
 
 @app.function(**COMMON, gpu="H100", cpu=4, memory=24576, timeout=20 * 60)
-def probe_gpu(steps: int = 40, batch_size: int = 16) -> dict:
+def probe_gpu(steps: int = 40, batch_size: int = 16, pack: str = "pack256") -> dict:
     """Seconds per step and peak memory of both stages at the real settings (nothing is saved)."""
     _code()
     import torch
 
-    _stage_pack()
-    res = {"gpu": torch.cuda.get_device_name(0)}
+    _stage_pack(f"{VOL}/{pack}")
+    res = {"gpu": torch.cuda.get_device_name(0), "pack": pack}
     for stage in ("warp", "texture"):
         cfg = _cfg("modal_full_256.yaml", [f"experiment.name=probe", "paths.drive_root=/tmp/probe",
                                            f"paths.pretrained_dir={PROJECT}/pretrained", f"training.batch_size={batch_size}",
                                            "training.val_every=100000", "training.checkpoint_every=100000",
-                                           "training.log_every=10"])
+                                           "training.log_every=10", "training.val_max_batches=1"])
         tr = _trainer(stage, cfg)
         tr.save = lambda is_best=False: None  # the probe never writes checkpoints
         torch.cuda.reset_peak_memory_stats()
@@ -267,8 +267,8 @@ def pack(limit: int = 0, gpu: str = "L4"):
 
 
 @app.local_entrypoint()
-def probe(gpus: str = "H100,A100-40GB,L40S", steps: int = 40, batch_size: int = 16):
-    calls = {g: probe_gpu.with_options(gpu=GPU_ALIASES.get(g, g)).spawn(steps, batch_size) for g in gpus.split(",")}
+def probe(gpus: str = "H100,A100-40GB,L40S", steps: int = 40, batch_size: int = 16, pack: str = "pack256"):
+    calls = {g: probe_gpu.with_options(gpu=GPU_ALIASES.get(g, g)).spawn(steps, batch_size, pack) for g in gpus.split(",")}
     print(json.dumps({g: c.get() for g, c in calls.items()}, indent=1))
 
 
