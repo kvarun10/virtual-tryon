@@ -136,3 +136,45 @@ region or FID sample size; ADGAN/DiOr are scored on all 8,570 pairs; FID depends
 The final-layout definition counts headwear and accessories, which the method never transfers (IoU 0), so it is lower.
 Per-class IoU (full_256, training metric): pants 0.85, dress 0.84, top 0.82, skirt 0.80, skin 0.75, outer 0.71,
 footwear 0.67. Files: report/data/layout_eval_*_20261027.md, pose_transfer_*_20261027.md, pack256_report_20261027.json.
+
+## v2 (2026-10-28): what was tried, what was kept
+
+All selection on validation try-ons (318 pose-change pairs of validation products, `modal_app.py::val_tryon`); the
+benchmark was run once on the chosen combination. Friend's workspace (lordjack265) for the texture work; cost there
+$10.09, own workspace $27.63 total.
+
+| change | validation try-on SSIM / LPIPS (paired vs current) | decision |
+|---|---|---|
+| DensePose body maps for the warp (retrained, 60k) | -0.016 [-0.018, -0.014] / +0.013 [+0.010, +0.016] | rejected: the clothed outline of SCHP-Pascal is a correct hint in pose transfer (same outfit) |
+| texture fine-tune (L1 5 + contextual 1 + LR decay), best val step 6k | +0.0014 [+0.0010, +0.0018] / -0.0009 (n.s.) | kept |
+| same, final step 20k | +0.0002 (n.s.) / +0.0002 (n.s.) | not used |
+
+Final model: warp `full_256/warp` (SCHP-Pascal, 60k) + texture `v2_256/texture_ft/best.pt` (step 6k, EMA).
+
+### Final benchmark (standard pairs, 7,990 scorable, whole 176 x 256, fully automatic)
+
+| | full_256 | **v2 final** | paired difference (95% CI) |
+|---|---|---|---|
+| SSIM (ours) | 0.6993 | **0.7014** | +0.0021 [+0.0020, +0.0022] |
+| SSIM (common protocol code: skimage, sigma 1.5, data range of the generated image) | - | **0.7000** | |
+| LPIPS (AlexNet, distance) | 0.2048 | **0.2039** | -0.0009 [-0.0011, -0.0007] |
+| L1 | 0.0680 | 0.0667 | -0.0013 [-0.0014, -0.0013] |
+| FID (vs 2,932 real target photos) | 13.64 | **13.14** | |
+
+Placement among methods re-scored on a common protocol (PIDM, CVPR 2023, Table 1, DeepFashion 256 x 176; read from the
+paper): ADGAN 14.46 / 0.672 / 0.228, PISE 13.61 / 0.663 / 0.206, GFLA 10.57 / 0.707 / 0.234, DPTN 11.39 / 0.711 /
+0.193, CASD 11.37 / 0.725 / 0.194, NTED 8.68 / 0.718 / 0.175, PIDM 6.37 / 0.731 / 0.168 (FID / SSIM / LPIPS). Ours
+13.14 / 0.700 / 0.204: better than ADGAN, PISE and PATN on all three; LPIPS also better than GFLA. Caveats: 7,990 of
+8,570 pairs (our locked test items are not scored), FID sample definitions may differ, our model never saw a standard
+test item while those methods trained on the standard split (439 test items also in its training pairs).
+
+### Where the points are lost (oracle diagnostics, validation try-ons, v2 final model)
+
+| setting | SSIM | LPIPS |
+|---|---|---|
+| fully automatic | 0.7735 | 0.167 |
+| manual garment labels instead of SCHP-LIP | 0.7786 (+0.005) | 0.161 |
+| + true target layout instead of the warp output | **0.8171 (+0.038)** | **0.122** |
+
+The warp costs ~8x more than the parser; with a perfect layout the texture network reaches 0.817. Next upgrade worth
+compute: the warp (capacity / body-garment attention / reference image as input), then the texture correspondence.
