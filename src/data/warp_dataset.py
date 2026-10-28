@@ -102,7 +102,12 @@ class WarpTripletDataset(Dataset):
     def __init__(self, prepared: PreparedData, split: str, cfg: ProjectConfig, train: bool,
                  body_source: Optional[BodyMapSource] = None, pairing: Optional[str] = None):
         store = getattr(prepared, "store", None)
-        self.records = [r for r in prepared.records(split) if r.parsing and (store is None or store.has_body(r.name))]
+        self.extra = cfg.model.warp_extra_body
+        self.ref_body = cfg.model.warp_ref_body
+        if self.extra != "none" and store is None:
+            raise ValueError("model.warp_extra_body needs the packed store (data.packed_dir)")
+        self.records = [r for r in prepared.records(split) if r.parsing and (store is None or store.has_body(r.name))
+                        and (self.extra == "none" or store.has_dp(r.name))]
         if not self.records:
             raise ValueError(f"No annotated images in split '{split}'")
         self.cfg, self.t = cfg, cfg.training
@@ -119,6 +124,10 @@ class WarpTripletDataset(Dataset):
         else:
             self.body = body_source or BodyMapSource(cfg, self.root)
             self.Kb = self.body.num_classes
+        self.Kb_base = self.Kb
+        if self.extra != "none":
+            self.Kx = get_label_set("body15").num_classes
+            self.Kb = self.Kb_base + self.Kx
         self.transfer = cfg.labels.transfer_classes
         supervised = set(self.transfer) | {"background", "skin"}
         self.ignore_ids = [i for i, n in enumerate(self.G.names) if n not in supervised]
@@ -156,6 +165,19 @@ class WarpTripletDataset(Dataset):
             return self._fit(self.store.body(rec.name))
         return resize_labels(self.body.load(rec), self.size, self.mode)[0]
 
+    def _body_tensor(self, rec, rng=None, augment: bool = False) -> torch.Tensor:
+        """Body encoder input: one-hot body map (+ one-hot DensePose parts when model.warp_extra_body)."""
+        body_map = self._body(rec)
+        if augment:
+            body_map = jitter_body_parts(body_map, rng, self.body_aug_px)
+        t = one_hot_t(body_map, self.Kb_base)
+        if self.extra != "none":
+            dp = self._fit(self.store.body_dp(rec.name))
+            if augment:
+                dp = jitter_body_parts(dp, rng, self.body_aug_px)
+            t = torch.cat([t, one_hot_t(dp, self.Kx)], 0)
+        return t
+
     def _rng(self, i: int) -> np.random.Generator:
         return np.random.default_rng([self.seed, self.epoch if self.train else 10_000, i])
 
@@ -176,12 +198,13 @@ class WarpTripletDataset(Dataset):
                                                       t.warp_affine_scale, t.warp_affine_max_translate))
         else:
             cloth = one_hot_t(cloth_map, self.G.num_classes)
-        body_map = self._body(tgt)
-        if augment_body:
-            body_map = jitter_body_parts(body_map, rng, self.body_aug_px)
+        body = self._body_tensor(tgt, rng, augment_body)
+        if self.ref_body:  # reference body maps for the clothes encoder; zeros for self pairs (garments displaced)
+            ref = torch.zeros_like(body) if i_body == i_cloth else self._body_tensor(src)
+            cloth = torch.cat([cloth, ref], 0)
         target = self._garment(tgt).astype(np.int64)
         target[np.isin(target, self.ignore_ids)] = IGNORE
-        return {"cloth": cloth, "body": one_hot_t(body_map, self.Kb), "target": torch.from_numpy(target),
+        return {"cloth": cloth, "body": body, "target": torch.from_numpy(target),
                 "mode": "self" if i_body == i_cloth else "cross_view", "src": src.name, "tgt": tgt.name}
 
     def __getitem__(self, i: int) -> Dict:

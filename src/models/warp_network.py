@@ -179,6 +179,22 @@ class DualPathUNet(nn.Module):
                 "cloth_up": tuple(f["cloth_up"].shape)}
 
 
+EXTRA_BODY_SETS = {"none": None, "densepose": "body15"}
+
+
+def warp_channels(cfg):
+    """(clothes-encoder channels, body-encoder channels, garment classes) for ``cfg`` (see model.warp_extra_body /
+    model.warp_ref_body)."""
+    from src.data.labels import get_label_set
+
+    kg = get_label_set(cfg.labels.garment_label_set).num_classes
+    kb = get_label_set(cfg.labels.body_label_set).num_classes
+    extra = EXTRA_BODY_SETS[cfg.model.warp_extra_body]
+    if extra:
+        kb += get_label_set(extra).num_classes
+    return kg + (kb if cfg.model.warp_ref_body else 0), kb, kg
+
+
 def build_warp_generator(cfg, cloth_channels: int, body_channels: int, out_channels: int) -> DualPathUNet:
     m = cfg.model
     return DualPathUNet(cloth_channels, body_channels, out_channels, cfg.data.image_size, base=m.warp_base_channels,

@@ -1,0 +1,23 @@
+# W1 (2026-10-28): richer warp inputs. Own experiment folder "w1_256"; full_256 / v2_256 untouched.
+# Motivation (docs/modal.md, oracle diagnostics): a perfect warp would add +0.038 SSIM, the parser only +0.005.
+#   * body encoder: SCHP-Pascal map (keeps the clothed-outline hint that beat DensePose alone) + DensePose body15
+#     parts (14 parts with left/right: front vs back views)
+#   * clothes encoder: also the REFERENCE person's body maps, so garment extents relative to the body are visible
+#     (zeros for self pairs, whose garments are randomly displaced)
+# Everything else as the full_256 warp (60k steps) plus a linear LR decay over the last 20k steps.
+# Texture: the final v2 texture (fine-tuned, step 6k). Kept only if it beats the final model on validation try-ons.
+_base_: modal_full_256.yaml
+
+experiment:
+  name: w1_256
+
+model:
+  warp_extra_body: densepose
+  warp_ref_body: true
+
+training:
+  warp_run_name: warp_w1
+  lr_decay_from: 40000
+
+evaluation:
+  texture_checkpoint: "{checkpoints_dir}/v2_256/texture_ft/best.pt"

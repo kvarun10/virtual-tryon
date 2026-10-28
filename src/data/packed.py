@@ -178,6 +178,16 @@ class PackedStore:
     def garment_auto(self, name: str) -> np.ndarray:
         return decode_png(self.blobs["garment_auto"].get(self.index[name]))
 
+    def has_dp(self, name: str) -> bool:
+        return self.dp is not None and bool(self._has_dp[self.index[name]])
+
+    def body_dp(self, name: str) -> np.ndarray:
+        """DensePose body15 map, whatever ``body_source`` is (used as an extra warp input)."""
+        data = self.dp.get(self.index[name]) if self.dp is not None else b""
+        if not data:
+            raise KeyError(f"{name}: no DensePose map")
+        return decode_png(data)
+
     def has_body(self, name: str) -> bool:
         """False only when DensePose maps are requested and this photo has none."""
         return self.body_source != "densepose" or bool(self._has_dp[self.index[name]])

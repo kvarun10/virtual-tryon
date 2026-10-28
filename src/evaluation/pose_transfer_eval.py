@@ -57,7 +57,8 @@ def evaluate_pose_transfer(models: TryOnModels, cfg: ProjectConfig, pairs: Seque
                            limit: Optional[int] = None, clothing=None, body=None, grid_path: Optional[Path] = None,
                            grid_rows: int = 8, progress: bool = True,
                            load: Optional[Callable[[str], np.ndarray]] = None, oracle: str = "none",
-                           gt_parse: Optional[Callable[[str], np.ndarray]] = None) -> Dict:
+                           gt_parse: Optional[Callable[[str], np.ndarray]] = None,
+                           extra_body: Optional[Callable[[str], np.ndarray]] = None) -> Dict:
     """``load(stem) -> RGB uint8`` replaces reading ``image_dir/<stem>.jpg`` (e.g. :func:`inshop_loader`).
 
     ``oracle`` (diagnostics on VALIDATION pairs only, never a reported result): ``labels`` uses the manual garment parse
@@ -105,11 +106,21 @@ def evaluate_pose_transfer(models: TryOnModels, cfg: ProjectConfig, pairs: Seque
         tgt_body = to_project_labels(body.predict(tgt_full, key=tgt), cfg.labels.body_label_set)
         ref_img, ref_p, _ = to_model_size(cfg, ref_full, ref_parse)
         tgt_img, tgt_b, tgt_p, info = to_model_size(cfg, tgt_full, tgt_body, tgt_parse)
+        w1 = {}
+        if cfg.model.warp_extra_body != "none":
+            if extra_body is None:
+                raise ValueError("model.warp_extra_body needs extra_body(stem) (e.g. DensePose maps from the store)")
+            w1["target_body_extra"] = to_model_size(cfg, tgt_full, extra_body(tgt))[1]
+        if cfg.model.warp_ref_body:
+            rb = to_project_labels(body.predict(ref_full, key=ref), cfg.labels.body_label_set)
+            w1["ref_body"] = to_model_size(cfg, ref_full, rb)[1]
+            if cfg.model.warp_extra_body != "none":
+                w1["ref_body_extra"] = to_model_size(cfg, ref_full, extra_body(ref))[1]
         override = None
         if oracle == "layout":
             override = tgt_p.copy()
             override[np.isin(override, untrained)] = 0  # what a perfect warp would output (it never predicts these)
-        core = tryon_core(models, ref_img, ref_p, tgt_img, tgt_b, tgt_p, layout_override=override)
+        core = tryon_core(models, ref_img, ref_p, tgt_img, tgt_b, tgt_p, layout_override=override, **w1)
         gt = to_protocol_frame(tgt_full)
         out = {"raw": model_output_to_protocol(core["raw"], info), "pasted": model_output_to_protocol(core["result"], info),
                "copy": to_protocol_frame(ref_full)}

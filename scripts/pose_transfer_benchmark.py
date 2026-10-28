@@ -15,6 +15,8 @@ Results: ``<drive>/outputs/<experiment>/pose_transfer/<time>/`` (leakage.json, r
 from __future__ import annotations
 
 import argparse
+
+import numpy as np
 import datetime as dt
 import json
 import sys
@@ -91,7 +93,8 @@ def main(argv=None) -> int:
     w, allow = metric_weights_dir(cfg), cfg.evaluation.allow_metric_download
     res = evaluate_pose_transfer(models, cfg, test_pairs, categorise_pairs(test_pairs, splits, available), a.image_dir,
                                  LPIPSMetric(models.device, w, allow), InceptionFeatures(models.device, w, allow),
-                                 limit=a.limit, grid_path=out / "grid.png", load=load, body=body)
+                                 limit=a.limit, grid_path=out / "grid.png", load=load, body=body,
+                                 extra_body=(lambda s: np.ascontiguousarray(store.body_dp(s)[:, 41:215])) if store else None)
     res.update({"checkpoints": models.info, "limit": a.limit, "official": a.limit is None and not a.pairs_from,
                 "pairs_from": str(a.pairs_from) if a.pairs_from else None,
                 "image_source": "packed In-shop store" if a.packed_dir else "DFMM photos", "split_file": cfg.data.split_file})

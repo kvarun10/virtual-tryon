@@ -50,7 +50,7 @@ image = (
 )
 
 COMMON = dict(image=image, volumes={VOL: vol})
-CONFIGS = {"full_256": "modal_full_256.yaml", "v2_256": "modal_v2_256.yaml"}
+CONFIGS = {"full_256": "modal_full_256.yaml", "v2_256": "modal_v2_256.yaml", "w1_256": "modal_w1_256.yaml"}
 GPU_ALIASES = {"A100": "A100-40GB", "A100-40": "A100-40GB", "A100-80": "A100-80GB"}
 
 
@@ -319,7 +319,8 @@ def run_val_tryon(which: str = "full_256", overrides: str = "", tag: str = "", m
     res = evaluate_pose_transfer(models, cfg, pairs, {p: "clean_val_items" for p in pairs}, None,
                                  LPIPSMetric(models.device, w, False), None, load=inshop_loader(st), body=body,
                                  grid_path=Path("/tmp/grid.png"), oracle=oracle,
-                                 gt_parse=lambda stem: np.ascontiguousarray(st.garment(stem)[:, 41:215]))
+                                 gt_parse=lambda stem: np.ascontiguousarray(st.garment(stem)[:, 41:215]),
+                                 extra_body=lambda stem: np.ascontiguousarray(st.body_dp(stem)[:, 41:215]))
     res.update({"which": which, "overrides": overrides, "checkpoints": models.info, "pairs": len(pairs)})
     out = Path(PROJECT, "outputs", "selection", time.strftime("%Y%m%d_%H%M%S") + (f"_{tag}" if tag else ""))
     out.mkdir(parents=True, exist_ok=True)
