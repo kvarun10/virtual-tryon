@@ -64,6 +64,8 @@ def extract_generator(zips, run: str, out_dir: Path) -> Path:
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--with-models", action="store_true",
+                    help="also upload the trained full_256 / v2_256 models from report/private/models (moving workspaces)")
     a = ap.parse_args(argv)
     img_zip = build_img_zip(find_img_root(SRC / "inshop" / "img"), WORK / "img.zip")
     ck = sorted((SRC / "checkpoints" / "baseline_128").glob("*.zip"))
@@ -73,6 +75,10 @@ def main(argv=None) -> int:
             *[(z, f"/raw/drive_zips/{z.name}") for z in sorted((SRC / "cache").glob("*.zip"))],
             *[(z, f"/raw/drive_zips/{z.name}") for z in sorted((SRC / "pretrained").glob("*.zip"))],
             *[(p, f"/project/checkpoints/baseline_128/{r}/generator_only.pt") for r, p in gens.items()]]
+    if a.with_models:
+        models = ROOT / "report" / "private" / "models"
+        for f in sorted(models.rglob("*.pt")):  # e.g. full_256/texture/last.pt -> /project/checkpoints/full_256/texture/last.pt
+            plan.append((f, "/project/checkpoints/" + f.relative_to(models).as_posix()))
     total = 0
     for local, remote in plan:
         if not Path(local).is_file():
