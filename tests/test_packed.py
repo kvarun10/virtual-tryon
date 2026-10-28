@@ -327,3 +327,17 @@ def test_texture_finetune_init_from_lr_decay_and_context(pack, tmp_path):
     # a second call resumes the fine-tune run itself (not init_from again)
     ft2 = TextureTrainer(cfg, prep, verbose=False)
     assert ft2.resume() and ft2.step == 3
+
+
+def test_contextual_loss_survives_rounding_noise():
+    """Cosines slightly above 1 (TF32 rounding on GPUs) must not produce NaN."""
+    from src.training import losses
+
+    torch.manual_seed(0)
+    y = torch.randn(2, 16, 8, 8)
+    orig = torch.bmm
+    try:  # simulate low-precision matmul: push some cosines above 1 and add noise
+        torch.bmm = lambda a, b: orig(a, b) * 1.003 + 1e-3 * torch.randn(a.shape[0], a.shape[1], b.shape[2])
+        assert torch.isfinite(losses.contextual_loss(y, y)) and torch.isfinite(losses.contextual_loss(y * 0 + 1e-8, y))
+    finally:
+        torch.bmm = orig
