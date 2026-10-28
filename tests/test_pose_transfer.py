@@ -90,3 +90,13 @@ def test_benchmark_runs_with_a_loader_and_no_image_dir(trained):
     res = evaluate_pose_transfer(models, cfg, pairs, {p: "clean_unseen" for p in pairs}, None, progress=False,
                                  load=lambda stem: load_image(paths[stem]))
     assert res["pairs_scored"] == 2 and np.isfinite(res["ssim_raw"])
+
+
+def test_validation_pairs_are_same_item_filtered_and_capped():
+    from src.evaluation.pose_transfer_eval import validation_pairs
+
+    names = [f"MEN-Denim-id_0000000{i}-01_{v}" for i in (1, 2) for v in ("1_front", "2_side", "3_back", "4_full")]
+    pairs = validation_pairs(names, lambda a, b: "4_full" not in a + b, max_per_item=4)
+    assert all(a.split("-")[2] == b.split("-")[2] and a != b for a, b in pairs)
+    assert all("4_full" not in a + b for a, b in pairs)
+    assert len(pairs) == 8 and pairs == validation_pairs(names, lambda a, b: "4_full" not in a + b, max_per_item=4)
