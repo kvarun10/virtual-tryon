@@ -192,10 +192,18 @@ def contextual_loss(x: torch.Tensor, y: torch.Tensor, h: float = 0.5, eps: float
     mu = y.mean(dim=(0, 2, 3), keepdim=True)
     x = F.normalize((x - mu).flatten(2), dim=1)  # B, C, N
     y = F.normalize((y - mu).flatten(2), dim=1)  # B, C, M
-    d = 1.0 - torch.bmm(x.transpose(1, 2), y)  # B, N, M  cosine distances
+    # Full fp32 matmul: with TF32 (training.fast_math) rounding pushes cosines above 1, distances below 0 and the
+    # relative distance below to a division by ~0 (NaN at step 0 on the H100, 2026-10-28).
+    tf32 = torch.backends.cuda.matmul.allow_tf32
+    torch.backends.cuda.matmul.allow_tf32 = False
+    try:
+        with torch.autocast(x.device.type, enabled=False):
+            cos = torch.bmm(x.transpose(1, 2), y)  # B, N, M
+    finally:
+        torch.backends.cuda.matmul.allow_tf32 = tf32
+    d = (1.0 - cos).clamp(min=0.0)  # cosine distances
     d = d / (d.min(dim=2, keepdim=True)[0] + eps)
-    w = torch.exp((1.0 - d) / h)
-    cx = (w / w.sum(dim=2, keepdim=True)).max(dim=1)[0].mean(dim=1)  # B
+    cx = torch.softmax((1.0 - d) / h, dim=2).max(dim=1)[0].mean(dim=1)  # stable normalised exp; B
     return (-torch.log(cx + eps)).mean()
 
 
