@@ -354,6 +354,41 @@ def layout_eval(which: str = "full_256", overrides: str = ""):
     run_layout_eval.remote(which, overrides)
 
 
+@app.function(**COMMON, cpu=2, memory=4096, timeout=600)
+def overlay_check(n: int = 6) -> bytes:
+    """PNG: photo | SCHP-Pascal body map | DensePose body map, for n training photos (alignment check)."""
+    _code()
+    import io
+
+    import numpy as np
+    from PIL import Image
+
+    from src.data.labels import get_label_set
+    from src.data.packed import PackedStore
+
+    st = PackedStore(Path(PACK), body_source="densepose")
+    names = [n_ for n_ in st.index if st.has_body(n_)][:: 5000][:n]
+    pal_b, pal_p = get_label_set("body15").palette_array(), get_label_set("pascal_person_part").palette_array()
+    rows = []
+    for name in names:
+        img = st.image(name)
+        dp = pal_b[st.body(name)]
+        st.body_source = "schp"
+        sp = pal_p[st.body(name)]
+        st.body_source = "densepose"
+        blend = (img * 0.5 + dp * 0.5).astype(np.uint8)
+        rows.append(np.concatenate([img, sp.astype(np.uint8), dp.astype(np.uint8), blend], 1))
+    buf = io.BytesIO()
+    Image.fromarray(np.concatenate(rows, 0)).save(buf, "PNG")
+    return buf.getvalue()
+
+
+@app.local_entrypoint()
+def check_overlay(out: str = "report/private/modal_runs/densepose_check.png"):
+    Path(out).write_bytes(overlay_check.remote())
+    print("saved", out)
+
+
 @app.local_entrypoint()
 def densepose(allow_download: bool = False):
     print(json.dumps(add_densepose_maps.remote("dfmm", allow_download), indent=1))
