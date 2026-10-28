@@ -341,3 +341,59 @@ def test_contextual_loss_survives_rounding_noise():
         assert torch.isfinite(losses.contextual_loss(y, y)) and torch.isfinite(losses.contextual_loss(y * 0 + 1e-8, y))
     finally:
         torch.bmm = orig
+
+
+def test_w1_warp_inputs_dataset_training_and_tryon(pack_dp, tmp_path):
+    """W1: SCHP body map + DensePose parts for the body encoder; reference body maps for the clothes encoder."""
+    from src.evaluation.pose_transfer_eval import evaluate_pose_transfer
+    from src.models.warp_network import warp_channels
+
+    d, _, missing = pack_dp
+    cfg = _cfg(tmp_path, d, "model.warp_extra_body=densepose", "model.warp_ref_body=true",
+               "training.warp_run_name=warp_w1")
+    kc, kb, kg = warp_channels(cfg)
+    assert (kc, kb, kg) == (12 + 7 + 15, 7 + 15, 12)
+    prep = load_packed(cfg)
+    ds = WarpTripletDataset(prep, "train", cfg, train=True)
+    assert not ({r.name for r in ds.records} & missing)  # photos without DensePose are skipped
+    selfs = [ds.build(i, i, np.random.default_rng(0), True, False) for i in range(2)]
+    assert all(s["cloth"].shape == (kc, 64, 64) and s["body"].shape == (kb, 64, 64) for s in selfs)
+    assert all(float(s["cloth"][kg:].abs().sum()) == 0 for s in selfs)  # self pairs: no reference body
+    j, k = next((a, b) for a in range(len(ds)) for b in range(len(ds))
+                if a != b and ds.records[a].item_id == ds.records[b].item_id)
+    cross = ds.build(j, k, np.random.default_rng(0), False, False)
+    assert float(cross["cloth"][kg:].sum()) > 0
+    WarpTrainer(cfg, prep, verbose=False).fit(max_steps=2, resume=False)
+    TextureTrainer(cfg, prep, verbose=False).fit(max_steps=1, resume=False)
+    models = load_tryon_models(cfg)
+    st = prep.store
+    by_item = {}
+    for r in prep.records("train"):
+        if st.has_dp(r.name):
+            by_item.setdefault(r.item_id, []).append(r.name)
+    pairs = [(v[0], v[1]) for v in by_item.values() if len(v) >= 2][:2]
+    res = evaluate_pose_transfer(models, cfg, pairs, {p: "clean_unseen" for p in pairs}, None, progress=False,
+                                 clothing=FakeClothing(), body=FakeBody(), load=inshop_loader(st),
+                                 extra_body=lambda s: np.ascontiguousarray(st.body_dp(s)[:, 41:215]))
+    assert pairs and res["pairs_scored"] == len(pairs) and np.isfinite(res["ssim_raw"])
+    with pytest.raises(ValueError):
+        evaluate_pose_transfer(models, cfg, pairs, {p: "clean_unseen" for p in pairs}, None, progress=False,
+                               clothing=FakeClothing(), body=FakeBody(), load=inshop_loader(st))
+
+
+class FakeClothing:
+    def predict(self, image, key=None):
+        from src.models.segmentation import SegmentationResult
+
+        lab = np.zeros(image.shape[:2], np.uint8)
+        lab[40:200, 40:130] = 5  # LIP upper-clothes
+        return SegmentationResult(lab, "lip", "fake", "clothing")
+
+
+class FakeBody:
+    def predict(self, image, key=None):
+        from src.models.segmentation import SegmentationResult
+
+        lab = np.zeros(image.shape[:2], np.uint8)
+        lab[40:200, 40:130] = 2  # torso
+        return SegmentationResult(lab, "pascal_person_part", "fake", "body")

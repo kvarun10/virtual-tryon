@@ -33,7 +33,7 @@ from src.data.labels import get_label_set
 from src.data.warp_dataset import IGNORE, SwapDiagnosticDataset, WarpTripletDataset
 from src.evaluation.metrics import ConfusionMatrix
 from src.models.discriminator import PatchDiscriminator
-from src.models.warp_network import build_warp_generator
+from src.models.warp_network import build_warp_generator, warp_channels
 from src.training.base import GANTrainer
 from src.training.losses import GANLoss, masked_probs, real_maps, segmentation_ce
 from src.utils.paths import ProjectPaths
@@ -115,7 +115,10 @@ class WarpTrainer(GANTrainer):
         self.val_ds = WarpTripletDataset(self.prepared, "val", cfg, train=False, body_source=self.train_ds.body)
         self.swap_ds = SwapDiagnosticDataset(self.val_ds, n=self.t.warp_swap_samples, seed=cfg.experiment.seed)
         Kg, Kb = self.G_labels.num_classes, self.train_ds.Kb
-        self.gen = build_warp_generator(cfg, Kg, Kb, Kg).to(self.device)
+        Kc, Kb_cfg, _ = warp_channels(cfg)
+        if Kb_cfg != Kb:
+            raise ValueError(f"body channels: dataset {Kb} vs config {Kb_cfg}")
+        self.gen = build_warp_generator(cfg, Kc, Kb, Kg).to(self.device)
         self.disc = PatchDiscriminator(Kg + Kb, cfg.model.discriminator_base_channels, cfg.model.disc_layers,
                                        cfg.model.spectral_norm).to(self.device)
         self.opt_g = torch.optim.Adam(self.gen.parameters(), lr=self.t.warp_lr, betas=tuple(self.t.warp_betas))
@@ -125,6 +128,8 @@ class WarpTrainer(GANTrainer):
                           "garment_label_set": cfg.labels.garment_label_set,
                           "body_label_set": cfg.labels.body_label_set, "body_backend": cfg.segmentation.body_backend,
                           "transfer_classes": list(cfg.labels.transfer_classes)}
+        if cfg.model.warp_extra_body != "none" or cfg.model.warp_ref_body:
+            self.signature["warp_inputs"] = {"extra_body": cfg.model.warp_extra_body, "ref_body": cfg.model.warp_ref_body}
         # Classes the warp is never trained on (IGNORE in every target): hair, face, headwear, accessory.
         self.untrained_ids = list(self.train_ds.ignore_ids)
         # mIoU = mean over the trained classes only (transfer classes + skin). Including untrained classes
@@ -271,8 +276,8 @@ class WarpTrainer(GANTrainer):
             if src is None:
                 continue
             for b in range(min(n, prd.shape[0])):
-                cloth = src["cloth"][b].argmax(0).numpy()
-                body = src["body"][b].argmax(0).numpy()
+                cloth = src["cloth"][b][: G.num_classes].argmax(0).numpy()
+                body = src["body"][b][: Bl.num_classes].argmax(0).numpy()
                 tiles = [gcol(cloth), Bl.palette_array()[body], gcol(prd[b])]
                 tiles.append(gcol(src["target"][b].numpy()) if title == "val" else np.full_like(tiles[0], 255))
                 rows.append(np.concatenate(tiles, 1))

@@ -210,6 +210,11 @@ class ModelConfig:  # warp fields used from Phase 4; texture fields reserved for
     warp_norm: str = "instance"  # instance | batch | none
     warp_dropout: float = 0.0
     disc_layers: int = 3  # PatchGAN depth
+    # W1 warp inputs (2026-10-28; defaults = original warp). warp_extra_body: also feed DensePose body15 parts
+    # (14 parts with left/right) next to the body backend's map. warp_ref_body: give the clothes encoder the
+    # REFERENCE person's body maps too (zeros for self pairs, whose garments are randomly displaced).
+    warp_extra_body: str = "none"  # none | densepose
+    warp_ref_body: bool = False
     texture_corr_size: int = 64  # CoCosNet: 64 x 64 correspondence
     texture_alpha: float = 100.0  # CoCosNet default softmax sharpness
     texture_feat_channels: int = 256
@@ -391,6 +396,8 @@ def validate_config(cfg: ProjectConfig) -> None:
         raise ConfigError("data.pair_filter must be none|classes|classes_color|same_seq")
     if data.pair_color_metric not in {"max", "weighted"}:
         raise ConfigError("data.pair_color_metric must be max|weighted")
+    if cfg.model.warp_extra_body not in {"none", "densepose"}:
+        raise ConfigError("model.warp_extra_body must be none|densepose")
     if data.body_source not in {"schp", "densepose"}:
         raise ConfigError("data.body_source must be schp|densepose")
     if data.label_source not in {"manual", "manual_then_auto"}:

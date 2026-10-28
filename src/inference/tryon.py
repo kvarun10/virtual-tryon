@@ -30,7 +30,7 @@ from src.config import ProjectConfig
 from src.data.labels import get_label_set, inject_identity_labels, keep_classes
 from src.data.preprocessing import image_to_tensor, resize_image, resize_labels, tensor_to_image
 from src.models.spade_generator import TextureGenerator, build_texture_generator
-from src.models.warp_network import DualPathUNet, build_warp_generator
+from src.models.warp_network import EXTRA_BODY_SETS, DualPathUNet, build_warp_generator, warp_channels
 from src.training.checkpointing import CheckpointManager, CheckpointMismatchError
 from src.utils.device import select_device
 from src.utils.paths import ProjectPaths
@@ -79,7 +79,8 @@ def load_tryon_models(cfg: ProjectConfig, warp: Union[str, Path] = "last", textu
     device = device or select_device(cfg.experiment.device)
     G = get_label_set(cfg.labels.garment_label_set)
     Kb = get_label_set(cfg.labels.body_label_set).num_classes
-    wg = build_warp_generator(cfg, G.num_classes, Kb, G.num_classes)
+    Kc, Kb_all, _ = warp_channels(cfg)
+    wg = build_warp_generator(cfg, Kc, Kb_all, G.num_classes)
     tg = build_texture_generator(cfg, G.num_classes)
     info = {"warp": _load_generator(wg, _checkpoint_path(cfg, "warp", warp), "warp"),
             "texture": _load_generator(tg, _checkpoint_path(cfg, "texture", texture), "texture")}
@@ -108,7 +109,9 @@ def feather(mask: np.ndarray, sigma: float = 1.0) -> np.ndarray:
 @torch.no_grad()
 def tryon_core(models: TryOnModels, ref_image: np.ndarray, ref_parse: np.ndarray, target_image: np.ndarray,
                target_body: np.ndarray, target_parse: np.ndarray, feather_sigma: float = 1.0,
-               timings: Optional[Dict[str, float]] = None, layout_override: Optional[np.ndarray] = None) -> Dict[str, np.ndarray]:
+               timings: Optional[Dict[str, float]] = None, layout_override: Optional[np.ndarray] = None,
+               target_body_extra: Optional[np.ndarray] = None, ref_body: Optional[np.ndarray] = None,
+               ref_body_extra: Optional[np.ndarray] = None) -> Dict[str, np.ndarray]:
     """All inputs already at model resolution: RGB uint8 [H,W,3]; parses garment12 [H,W]; body in the body label set.
 
     ``timings``: if a dict is given, seconds for ``warp`` and ``texture`` (incl. identity paste) are written into it
@@ -123,7 +126,22 @@ def tryon_core(models: TryOnModels, ref_image: np.ndarray, ref_parse: np.ndarray
             raise ValueError(f"{name} has size {arr.shape[:2]}, expected model size {size}")
     t0 = _clock(dev)
     c_seg = keep_classes(ref_parse, G, cfg.labels.transfer_classes)
-    logits = models.warp(_one_hot(c_seg, G.num_classes, dev), _one_hot(target_body, Kb, dev)).float()
+    extra = EXTRA_BODY_SETS[cfg.model.warp_extra_body]
+
+    def body_t(base, ext, what):
+        t = _one_hot(base, Kb, dev)
+        if extra:
+            if ext is None:
+                raise ValueError(f"model.warp_extra_body={cfg.model.warp_extra_body} needs {what}_extra (DensePose map)")
+            t = torch.cat([t, _one_hot(ext, get_label_set(extra).num_classes, dev)], 1)
+        return t
+
+    cloth_in = _one_hot(c_seg, G.num_classes, dev)
+    if cfg.model.warp_ref_body:
+        if ref_body is None:
+            raise ValueError("model.warp_ref_body needs ref_body (the reference person's body map)")
+        cloth_in = torch.cat([cloth_in, body_t(ref_body, ref_body_extra, "ref_body")], 1)
+    logits = models.warp(cloth_in, body_t(target_body, target_body_extra, "target_body")).float()
     logits[:, models.untrained_ids] = -torch.inf
     c_warp = logits.argmax(1)[0].cpu().numpy().astype(np.uint8)
     if layout_override is not None:  # diagnostics only: a given layout replaces the warp output ("perfect warp")
