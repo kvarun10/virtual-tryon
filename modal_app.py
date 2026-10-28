@@ -292,6 +292,42 @@ def run_layout_eval(which: str = "full_256", overrides: str = "") -> dict:
     return res
 
 
+@app.function(**COMMON, gpu="L4", cpu=6, memory=24576, timeout=3 * 3600)
+def run_val_tryon(which: str = "full_256", overrides: str = "", tag: str = "", max_per_item: int = 6) -> dict:
+    """Model selection: fully automatic try-on on pose-change pairs of VALIDATION products (never benchmark pairs),
+    whole-image SSIM / L1 / LPIPS like the benchmark. Compare warps / textures with ``overrides`` (checkpoints)."""
+    _code()
+    _stage_pack()
+    from src.data.packed import load_packed
+    from src.data.pair_quality import PairFilter
+    from src.evaluation.final_eval import metric_weights_dir
+    from src.evaluation.image_metrics import LPIPSMetric
+    from src.evaluation.pose_transfer_eval import PackedBodyBackend, evaluate_pose_transfer, inshop_loader, validation_pairs
+    from src.inference.tryon import load_tryon_models
+
+    cfg = _cfg(CONFIGS[which], ["segmentation.cache_outputs=false", *[o for o in overrides.split(";") if o]])
+    prep = load_packed(cfg)
+    st = prep.store
+    pf = PairFilter(cfg.data.pair_filter, cfg.data.pair_table, cfg.data.pair_max_delta_e, cfg.data.pair_color_metric)
+    pairs = validation_pairs([n for n in prep.splits["val"] if st.has_body(n)], pf.ok, max_per_item)
+    models = load_tryon_models(cfg, warp=cfg.evaluation.warp_checkpoint, texture=cfg.evaluation.texture_checkpoint)
+    body = PackedBodyBackend(st, cfg.labels.body_label_set) if cfg.data.body_source != "schp" else None
+    w = metric_weights_dir(cfg)
+    res = evaluate_pose_transfer(models, cfg, pairs, {p: "clean_val_items" for p in pairs}, None,
+                                 LPIPSMetric(models.device, w, False), None, load=inshop_loader(st), body=body,
+                                 grid_path=Path("/tmp/grid.png"))
+    res.update({"which": which, "overrides": overrides, "checkpoints": models.info, "pairs": len(pairs)})
+    out = Path(PROJECT, "outputs", "selection", time.strftime("%Y%m%d_%H%M%S") + (f"_{tag}" if tag else ""))
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "results.json").write_text(json.dumps(res, indent=1, default=str), encoding="utf-8")
+    shutil.copy("/tmp/grid.png", out / "grid.png")
+    vol.commit()
+    summary = {k: res.get(k) for k in ("pairs", "ssim_raw", "l1_raw", "lpips_raw", "ssim_pasted", "ssim_copy")}
+    summary.update({"tag": tag, "dir": str(out), "checkpoints": models.info})
+    print(json.dumps(summary, indent=1, default=str))
+    return summary
+
+
 @app.function(**COMMON, cpu=1, memory=2048, timeout=600)
 def volume_status() -> dict:
     vol.reload()
@@ -392,6 +428,11 @@ def check_overlay(out: str = "report/private/modal_runs/densepose_check.png"):
 @app.local_entrypoint()
 def densepose(allow_download: bool = False):
     print(json.dumps(add_densepose_maps.remote("dfmm", allow_download), indent=1))
+
+
+@app.local_entrypoint()
+def val_tryon(which: str = "full_256", overrides: str = "", tag: str = "", gpu: str = "L4"):
+    run_val_tryon.with_options(gpu=GPU_ALIASES.get(gpu, gpu)).remote(which, overrides, tag)
 
 
 @app.local_entrypoint()

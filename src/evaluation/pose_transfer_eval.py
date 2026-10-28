@@ -122,6 +122,26 @@ def evaluate_pose_transfer(models: TryOnModels, cfg: ProjectConfig, pairs: Seque
     return res
 
 
+def validation_pairs(names: Sequence[str], pair_ok, max_per_item: int = 6, seed: int = 0) -> List[Tuple[str, str]]:
+    """Ordered (reference, target) pose-change pairs among our VALIDATION photos (same item, different photo,
+    accepted by ``pair_ok(a, b)``, e.g. the training pair filter). At most ``max_per_item`` per item, fixed seed.
+    Used for model selection, so the standard benchmark pairs are never used to choose between models."""
+    from collections import defaultdict
+
+    rng = np.random.default_rng(seed)
+    by_item = defaultdict(list)
+    for n in sorted(names):
+        by_item[n.split("-")[2]].append(n)
+    out = []
+    for item in sorted(by_item):
+        photos = by_item[item]
+        cand = [(a, b) for a in photos for b in photos if a != b and pair_ok(a, b)]
+        if len(cand) > max_per_item:
+            cand = [cand[i] for i in sorted(rng.choice(len(cand), max_per_item, replace=False))]
+        out += cand
+    return out
+
+
 INSHOP_CONTENT_COLS = (41, 215)  # In-shop 256 x 256 photos = DFMM photo letterboxed to 174 x 256 at column 41
 
 
