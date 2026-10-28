@@ -35,6 +35,17 @@ from src.models.segmentation import build_backend, to_project_labels
 SCORED = ("clean_unseen", "clean_val_items")
 
 
+def ssim_common(generated: np.ndarray, reference: np.ndarray) -> float:
+    """SSIM as in the public pose-transfer evaluation code used by PATN, GFLA, NTED and PIDM (from PATN's metric
+    script): scikit-image ``structural_similarity`` on RGB, Gaussian window (sigma 1.5), population covariance,
+    ``data_range = generated.max() - generated.min()``. Our :func:`src.evaluation.metrics.ssim` uses a fixed range."""
+    from skimage.metrics import structural_similarity
+
+    g = generated.astype(np.float64)
+    return float(structural_similarity(g, reference.astype(np.float64), gaussian_weights=True, sigma=1.5,
+                                       use_sample_covariance=False, channel_axis=2, data_range=g.max() - g.min()))
+
+
 def _t(img: np.ndarray) -> torch.Tensor:
     return torch.from_numpy(np.ascontiguousarray(img)).permute(2, 0, 1)[None].float() / 255
 
@@ -45,8 +56,18 @@ def evaluate_pose_transfer(models: TryOnModels, cfg: ProjectConfig, pairs: Seque
                            lpips_metric: Optional[LPIPSMetric] = None, features: Optional[InceptionFeatures] = None,
                            limit: Optional[int] = None, clothing=None, body=None, grid_path: Optional[Path] = None,
                            grid_rows: int = 8, progress: bool = True,
-                           load: Optional[Callable[[str], np.ndarray]] = None) -> Dict:
-    """``load(stem) -> RGB uint8`` replaces reading ``image_dir/<stem>.jpg`` (e.g. :func:`inshop_loader`)."""
+                           load: Optional[Callable[[str], np.ndarray]] = None, oracle: str = "none",
+                           gt_parse: Optional[Callable[[str], np.ndarray]] = None) -> Dict:
+    """``load(stem) -> RGB uint8`` replaces reading ``image_dir/<stem>.jpg`` (e.g. :func:`inshop_loader`).
+
+    ``oracle`` (diagnostics on VALIDATION pairs only, never a reported result): ``labels`` uses the manual garment parse
+    (``gt_parse(stem)``, same frame as the photo) instead of the automatic parser for both photos; ``layout`` also
+    replaces the warp output with the target's own manual layout (a perfect warp). The gap to ``none`` shows how many
+    points the parser and the warp cost."""
+    if oracle not in ("none", "labels", "layout"):
+        raise ValueError(f"oracle must be none|labels|layout, got {oracle}")
+    if oracle != "none" and gt_parse is None:
+        raise ValueError("oracle needs gt_parse")
     from src.evaluation.final_eval import _features, _fid_kid
 
     G = get_label_set(cfg.labels.garment_label_set)
@@ -61,12 +82,14 @@ def evaluate_pose_transfer(models: TryOnModels, cfg: ProjectConfig, pairs: Seque
     def stage_a(stem: str):
         if stem not in memo:
             img = load(stem) if load is not None else load_image(image_dir / f"{stem}.jpg")
-            memo[stem] = (img, to_project_labels(clothing.predict(img, key=stem), G.name))
+            parse = gt_parse(stem) if oracle != "none" else to_project_labels(clothing.predict(img, key=stem), G.name)
+            memo[stem] = (img, parse)
             if len(memo) > 64:  # bounded cache
                 memo.pop(next(iter(memo)))
         return memo[stem]
 
-    keys = [f"{m}_{v}" for v in ("raw", "pasted", "copy") for m in ("ssim", "l1", "lpips")]
+    keys = [f"{m}_{v}" for v in ("raw", "pasted", "copy") for m in ("ssim", "ssim_common", "l1", "lpips")]
+    untrained = [i for i, nm in enumerate(G.names) if nm not in set(cfg.labels.transfer_classes) | {"background", "skin"}]
     scores: Dict[str, List[float]] = {k: [] for k in keys}
     per_cat = {c: [] for c in SCORED}
     fake, real, rows = [], [], []
@@ -82,7 +105,11 @@ def evaluate_pose_transfer(models: TryOnModels, cfg: ProjectConfig, pairs: Seque
         tgt_body = to_project_labels(body.predict(tgt_full, key=tgt), cfg.labels.body_label_set)
         ref_img, ref_p, _ = to_model_size(cfg, ref_full, ref_parse)
         tgt_img, tgt_b, tgt_p, info = to_model_size(cfg, tgt_full, tgt_body, tgt_parse)
-        core = tryon_core(models, ref_img, ref_p, tgt_img, tgt_b, tgt_p)
+        override = None
+        if oracle == "layout":
+            override = tgt_p.copy()
+            override[np.isin(override, untrained)] = 0  # what a perfect warp would output (it never predicts these)
+        core = tryon_core(models, ref_img, ref_p, tgt_img, tgt_b, tgt_p, layout_override=override)
         gt = to_protocol_frame(tgt_full)
         out = {"raw": model_output_to_protocol(core["raw"], info), "pasted": model_output_to_protocol(core["result"], info),
                "copy": to_protocol_frame(ref_full)}
@@ -90,6 +117,7 @@ def evaluate_pose_transfer(models: TryOnModels, cfg: ProjectConfig, pairs: Seque
         for v, img in out.items():
             a = _t(img)
             scores[f"ssim_{v}"].append(float(ssim(a, b)[0]))
+            scores[f"ssim_common_{v}"].append(ssim_common(img, gt))
             scores[f"l1_{v}"].append(float((a - b).abs().mean()))
             if lpips_metric is not None:
                 scores[f"lpips_{v}"].append(float(lpips_metric(a, b)[0]))
@@ -180,10 +208,12 @@ def format_pose_transfer(res: Dict, leak: Dict) -> str:
          f"Standard test pairs: {leak['standard_test_pairs']}; by leakage category: {leak['pairs_by_category']}.",
          f"Scored here: {res['pairs_scored']} pairs ({res['by_category']}). Our networks run at {res['model_size']} and are "
          "upscaled to 176 x 256, which lowers sharpness-sensitive scores.", "",
-         "| variant | SSIM (higher better) | L1 (lower) | LPIPS (lower, distance) |", "|---|---|---|---|"]
+         "| variant | SSIM (ours) | SSIM (common protocol code) | L1 (lower) | LPIPS (lower, distance) |",
+         "|---|---|---|---|---|"]
     for v, label in (("raw", "ours, raw output (primary)"), ("pasted", "ours + target face/hair pixels (uses GT pixels)"),
                      ("copy", "copy the reference photo (lower bound)")):
-        L.append(f"| {label} | {res.get('ssim_' + v, float('nan')):.4f} | {res.get('l1_' + v, float('nan')):.4f} | "
+        L.append(f"| {label} | {res.get('ssim_' + v, float('nan')):.4f} | {res.get('ssim_common_' + v, float('nan')):.4f} | "
+                 f"{res.get('l1_' + v, float('nan')):.4f} | "
                  f"{res.get('lpips_' + v, float('nan')):.4f} |")
     fk = res.get("fid_kid_raw_vs_real_targets")
     if fk:

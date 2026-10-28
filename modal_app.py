@@ -42,7 +42,7 @@ image = (
     modal.Image.debian_slim(python_version="3.11")
     .uv_pip_install("torch==2.6.0", "torchvision==0.21.0", "numpy>=1.24,<2.3", "pillow>=10", "opencv-python-headless>=4.8",
                     "scipy>=1.10", "pyyaml>=6", "tqdm>=4.65", "gdown>=5.1", "lpips>=0.1.4", "pytorch-fid>=0.3.0",
-                    "matplotlib>=3.7")
+                    "matplotlib>=3.7", "scikit-image>=0.22")
     .env({"PYTHONUNBUFFERED": "1", "TORCH_HOME": f"{PROJECT}/pretrained/torch"})
     .add_local_dir(ROOT / "src", f"{CODE}/src")
     .add_local_dir(ROOT / "scripts", f"{CODE}/scripts")
@@ -293,11 +293,14 @@ def run_layout_eval(which: str = "full_256", overrides: str = "") -> dict:
 
 
 @app.function(**COMMON, gpu="L4", cpu=6, memory=24576, timeout=3 * 3600)
-def run_val_tryon(which: str = "full_256", overrides: str = "", tag: str = "", max_per_item: int = 6) -> dict:
+def run_val_tryon(which: str = "full_256", overrides: str = "", tag: str = "", max_per_item: int = 6,
+                  oracle: str = "none") -> dict:
     """Model selection: fully automatic try-on on pose-change pairs of VALIDATION products (never benchmark pairs),
     whole-image SSIM / L1 / LPIPS like the benchmark. Compare warps / textures with ``overrides`` (checkpoints)."""
     _code()
     _stage_pack()
+    import numpy as np
+
     from src.data.packed import load_packed
     from src.data.pair_quality import PairFilter
     from src.evaluation.final_eval import metric_weights_dir
@@ -315,14 +318,18 @@ def run_val_tryon(which: str = "full_256", overrides: str = "", tag: str = "", m
     w = metric_weights_dir(cfg)
     res = evaluate_pose_transfer(models, cfg, pairs, {p: "clean_val_items" for p in pairs}, None,
                                  LPIPSMetric(models.device, w, False), None, load=inshop_loader(st), body=body,
-                                 grid_path=Path("/tmp/grid.png"))
+                                 grid_path=Path("/tmp/grid.png"), oracle=oracle,
+                                 gt_parse=lambda stem: np.ascontiguousarray(st.garment(stem)[:, 41:215]))
     res.update({"which": which, "overrides": overrides, "checkpoints": models.info, "pairs": len(pairs)})
     out = Path(PROJECT, "outputs", "selection", time.strftime("%Y%m%d_%H%M%S") + (f"_{tag}" if tag else ""))
     out.mkdir(parents=True, exist_ok=True)
     (out / "results.json").write_text(json.dumps(res, indent=1, default=str), encoding="utf-8")
     shutil.copy("/tmp/grid.png", out / "grid.png")
     vol.commit()
-    summary = {k: res.get(k) for k in ("pairs", "ssim_raw", "l1_raw", "lpips_raw", "ssim_pasted", "ssim_copy")}
+    res["oracle"] = oracle
+    summary = {k: res.get(k) for k in ("pairs", "ssim_raw", "ssim_common_raw", "l1_raw", "lpips_raw", "ssim_pasted",
+                                       "ssim_copy")}
+    summary["oracle"] = oracle
     summary.update({"tag": tag, "dir": str(out), "checkpoints": models.info})
     print(json.dumps(summary, indent=1, default=str))
     return summary
@@ -437,8 +444,8 @@ def densepose(allow_download: bool = False):
 
 
 @app.local_entrypoint()
-def val_tryon(which: str = "full_256", overrides: str = "", tag: str = "", gpu: str = "L4"):
-    run_val_tryon.with_options(gpu=GPU_ALIASES.get(gpu, gpu)).remote(which, overrides, tag)
+def val_tryon(which: str = "full_256", overrides: str = "", tag: str = "", gpu: str = "L4", oracle: str = "none"):
+    run_val_tryon.with_options(gpu=GPU_ALIASES.get(gpu, gpu)).remote(which, overrides, tag, 6, oracle)
 
 
 @app.local_entrypoint()

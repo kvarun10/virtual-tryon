@@ -100,3 +100,40 @@ def test_validation_pairs_are_same_item_filtered_and_capped():
     assert all(a.split("-")[2] == b.split("-")[2] and a != b for a, b in pairs)
     assert all("4_full" not in a + b for a, b in pairs)
     assert len(pairs) == 8 and pairs == validation_pairs(names, lambda a, b: "4_full" not in a + b, max_per_item=4)
+
+
+def test_ssim_common_matches_definition():
+    from skimage.metrics import structural_similarity
+
+    from src.evaluation.pose_transfer_eval import ssim_common
+
+    rng = np.random.default_rng(0)
+    a = rng.integers(0, 256, (64, 48, 3)).astype(np.uint8)
+    assert abs(ssim_common(a, a) - 1.0) < 1e-9
+    b = np.clip(a.astype(int) + rng.integers(-20, 20, a.shape), 0, 255).astype(np.uint8)
+    ref = structural_similarity(a.astype(float), b.astype(float), gaussian_weights=True, sigma=1.5,
+                                use_sample_covariance=False, channel_axis=2, data_range=float(a.max() - a.min()))
+    assert abs(ssim_common(a, b) - ref) < 1e-12
+
+
+def test_oracle_modes_run_and_layout_oracle_skips_the_warp(trained):
+    from src.data.preprocessing import load_image
+
+    cfg, prepared, models = trained
+    by_item = {}
+    for r in prepared.records("train"):
+        by_item.setdefault(r.item_id, []).append(r)
+    pairs = [(v[0].name, v[1].name) for v in by_item.values() if len(v) >= 2][:2]
+    recs = {r.name: r for r in prepared.records("train")}
+    load = lambda s: load_image(prepared.index.root / recs[s].image)
+    from src.data.labels import convert_labels
+    from src.data.preprocessing import load_label_map
+
+    gt = lambda s: convert_labels(load_label_map(prepared.index.root / recs[s].parsing), "dfmm", "garment12")
+    cats = {p: "clean_val_items" for p in pairs}
+    for mode in ("none", "labels", "layout"):
+        res = evaluate_pose_transfer(models, cfg, pairs, cats, None, progress=False, load=load, oracle=mode,
+                                     gt_parse=gt)
+        assert res["pairs_scored"] == 2 and np.isfinite(res["ssim_raw"]) and np.isfinite(res["ssim_common_raw"])
+    with pytest.raises(ValueError):
+        evaluate_pose_transfer(models, cfg, pairs, cats, None, progress=False, load=load, oracle="labels")

@@ -108,7 +108,7 @@ def feather(mask: np.ndarray, sigma: float = 1.0) -> np.ndarray:
 @torch.no_grad()
 def tryon_core(models: TryOnModels, ref_image: np.ndarray, ref_parse: np.ndarray, target_image: np.ndarray,
                target_body: np.ndarray, target_parse: np.ndarray, feather_sigma: float = 1.0,
-               timings: Optional[Dict[str, float]] = None) -> Dict[str, np.ndarray]:
+               timings: Optional[Dict[str, float]] = None, layout_override: Optional[np.ndarray] = None) -> Dict[str, np.ndarray]:
     """All inputs already at model resolution: RGB uint8 [H,W,3]; parses garment12 [H,W]; body in the body label set.
 
     ``timings``: if a dict is given, seconds for ``warp`` and ``texture`` (incl. identity paste) are written into it
@@ -126,6 +126,8 @@ def tryon_core(models: TryOnModels, ref_image: np.ndarray, ref_parse: np.ndarray
     logits = models.warp(_one_hot(c_seg, G.num_classes, dev), _one_hot(target_body, Kb, dev)).float()
     logits[:, models.untrained_ids] = -torch.inf
     c_warp = logits.argmax(1)[0].cpu().numpy().astype(np.uint8)
+    if layout_override is not None:  # diagnostics only: a given layout replaces the warp output ("perfect warp")
+        c_warp = layout_override.astype(np.uint8)
     layout = inject_identity_labels(c_warp, target_parse, G, cfg.labels.preserve_classes)  # paper Sec. 4.2
     t1 = _clock(dev)
     out = models.texture(_one_hot(layout, G.num_classes, dev), image_to_tensor(ref_image)[None].to(dev),
