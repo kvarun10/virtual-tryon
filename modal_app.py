@@ -367,7 +367,7 @@ def probe(gpus: str = "H100,A100-40GB,L40S", steps: int = 40, batch_size: int = 
 
 @app.local_entrypoint()
 def train(stage: str, max_steps: int, gpu: str = "H100", time_limit_min: float = 0, overrides: str = "", cpu: int = 0,
-          which: str = "full_256"):
+          which: str = "full_256", wait: bool = False):
     """``--cpu N`` gives the container N cores and N - 1 DataLoader workers (the warp stage is CPU-bound)."""
     if stage not in ("warp", "texture"):
         raise SystemExit("--stage must be warp or texture")
@@ -376,7 +376,13 @@ def train(stage: str, max_steps: int, gpu: str = "H100", time_limit_min: float =
         opts["cpu"] = float(cpu)
         overrides = ";".join(o for o in (overrides, f"data.num_workers={cpu - 1}") if o)
     fn = train_stage.with_options(**opts)
-    print(json.dumps(fn.remote(stage, max_steps, time_limit_min, CONFIGS[which], overrides), indent=1))
+    if wait:
+        print(json.dumps(fn.remote(stage, max_steps, time_limit_min, CONFIGS[which], overrides), indent=1))
+        return
+    # Default: spawn and return. With `modal run --detach` the job then runs on Modal independently of this PC
+    # (a .remote() call is cancelled when the local client disconnects, e.g. laptop sleep; seen 2026-10-28).
+    call = fn.spawn(stage, max_steps, time_limit_min, CONFIGS[which], overrides)
+    print(f"spawned {stage} training: call {call.object_id}; safe to disconnect. Progress: modal_app.py::status")
 
 
 @app.local_entrypoint()
