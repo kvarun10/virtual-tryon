@@ -395,8 +395,13 @@ def train(stage: str, max_steps: int, gpu: str = "H100", time_limit_min: float =
 
 @app.local_entrypoint()
 def benchmark(which: str = "full_256", limit: int = 0, gpu: str = "L4", pairs_from: str = "", tag: str = "",
-              overrides: str = ""):
-    print(run_benchmark.with_options(gpu=GPU_ALIASES.get(gpu, gpu)).remote(which, limit, pairs_from, tag, overrides))
+              overrides: str = "", wait: bool = False):
+    fn = run_benchmark.with_options(gpu=GPU_ALIASES.get(gpu, gpu))
+    if wait:
+        print(fn.remote(which, limit, pairs_from, tag, overrides))
+        return
+    call = fn.spawn(which, limit, pairs_from, tag, overrides)  # with --detach: survives this PC disconnecting
+    print(f"spawned benchmark: call {call.object_id}; safe to disconnect. Results: outputs/<experiment>/pose_transfer/")
 
 
 @app.local_entrypoint()
