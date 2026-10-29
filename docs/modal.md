@@ -186,3 +186,16 @@ SCHP-Pascal + DensePose body15 for the body encoder, reference body maps for the
 0.880. Validation try-ons (318 pairs, final texture, paired vs the final model): SSIM +0.0000 [-0.0010, +0.0011],
 LPIPS -0.0028 [-0.0051, -0.0004], L1 -0.0002 (n.s.). The higher layout mIoU did not reach the images; only LPIPS improved
 slightly. Not adopted by default: it adds a DensePose dependency at inference for no SSIM gain (decision: user).
+
+### W1 benchmark (2026-10-29, standard pairs; 7,954 scorable: 36 pairs touch In-shop-only photos without DensePose)
+
+| same 7,954 pairs | v2 final | W1 | paired difference (95% CI) |
+|---|---|---|---|
+| SSIM (ours) | 0.7020 | 0.7028 | +0.0008 [+0.0005, +0.0011] |
+| SSIM (common protocol code) | 0.7006 | 0.7015 | +0.0009 [+0.0006, +0.0012] |
+| LPIPS | 0.2034 | 0.2010 | -0.0023 [-0.0028, -0.0018] |
+| L1 | 0.0665 | 0.0657 | -0.0008 [-0.0010, -0.0007] |
+| FID | 13.14 (7,990 pairs) | 12.83 (7,954 pairs) | |
+
+W1 is better on every metric, by small amounts. Trade-off: it needs DensePose maps at inference (available for all
+DFMM photos; own photos would need a DensePose model). Cost on lordjack265 after this run: $19.03.
