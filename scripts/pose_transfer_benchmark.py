@@ -62,6 +62,8 @@ def main(argv=None) -> int:
 
         store = PackedStore(a.packed_dir, body_source=cfg.data.body_source)
         available, load = {n for n in store.index if store.has_body(n)}, inshop_loader(store)
+        if cfg.model.warp_extra_body != "none":  # e.g. W1 needs DensePose for both photos; In-shop-only photos have none
+            available = {n for n in available if store.has_dp(n)}
     elif a.image_dir:
         store = None
         available, load = {p.stem for p in a.image_dir.iterdir() if p.suffix.lower() == ".jpg"}, None
