@@ -199,3 +199,18 @@ slightly. Not adopted by default: it adds a DensePose dependency at inference fo
 
 W1 is better on every metric, by small amounts. Trade-off: it needs DensePose maps at inference (available for all
 DFMM photos; own photos would need a DensePose model). Cost on lordjack265 after this run: $19.03.
+
+## Final model (decided 2026-10-29)
+
+**W1** = warp `w1_256/warp_w1` (SCHP-Pascal + DensePose body maps, reference body maps; 60k steps) + texture
+`v2_256/texture_ft/best.pt` (fine-tuned, step 6k). Config `configs/modal_w1_256.yaml`.
+
+Standard benchmark (7,954 scorable pairs, whole 176 x 256, fully automatic): **SSIM 0.7028 (common protocol 0.7015),
+LPIPS 0.2010, FID 12.83.** On the common re-scored scale (PIDM Table 1) this beats ADGAN (14.46 / 0.672 / 0.228),
+PISE (13.61 / 0.663 / 0.206) and PATN on all three metrics, and GFLA on LPIPS; it is below GFLA, DPTN, CASD, NTED and
+PIDM on SSIM.
+
+Requirement: DensePose maps for both photos (present for all DFMM photos; own photos would need a DensePose model).
+For own-photo demos without DensePose, use v2 (warp `full_256/warp` + the same texture), 0.0009 SSIM lower.
+Weights on the PC: `report/private/models/w1_256/warp_w1/generator_only.pt`,
+`report/private/models/v2_256/texture_ft/generator_only.pt` (and `full_256/warp/` for v2).
