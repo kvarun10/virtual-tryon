@@ -178,3 +178,11 @@ test item while those methods trained on the standard split (439 test items also
 
 The warp costs ~8x more than the parser; with a perfect layout the texture network reaches 0.817. Next upgrade worth
 compute: the warp (capacity / body-garment attention / reference image as input), then the texture correspondence.
+
+## W1 warp (2026-10-29): richer warp inputs
+
+SCHP-Pascal + DensePose body15 for the body encoder, reference body maps for the clothes encoder (`configs/modal_w1_256.yaml`),
+60k steps on L40S (friend's workspace, ~$7.7). Warp validation mIoU 0.799 vs 0.790 (+0.009), swap area agreement 0.871 vs
+0.880. Validation try-ons (318 pairs, final texture, paired vs the final model): SSIM +0.0000 [-0.0010, +0.0011],
+LPIPS -0.0028 [-0.0051, -0.0004], L1 -0.0002 (n.s.). The higher layout mIoU did not reach the images; only LPIPS improved
+slightly. Not adopted by default: it adds a DensePose dependency at inference for no SSIM gain (decision: user).
