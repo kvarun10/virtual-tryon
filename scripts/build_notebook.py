@@ -96,6 +96,11 @@ PT_LIMIT = None                    # None = all scorable pairs; a number = quick
 # --- DeepFashion In-shop inspection (Section 12c; needs the Drive shortcut, text files only) -------------
 RUN_INSHOP_INSPECTION = False
 INSHOP_DIR = "/content/drive/MyDrive/VirtualTryOn/datasets/In-shop Clothes Retrieval Benchmark"
+# --- Section 16: final model demo and results (presentation) ------------------------------------------------
+RUN_FINAL_DEMO = False             # load the final 256 px models from Drive (checkpoints/full_256/warp, v2_256/texture_ft)
+RUN_SHOW_RESULTS = False           # print all metric tables, recomputed from report/data/results (no GPU, no data)
+RUN_LIVE_BENCHMARK = False         # score the final model live on LIVE_PAIRS standard pairs (needs FETCH_DFMM=True)
+LIVE_PAIRS = 100
 """)
 
 md(r"""
@@ -778,6 +783,97 @@ assert load_config(out_dir / "config_resolved.yaml").to_dict() == cfg.to_dict()
 print("saved config reloads identically")
 """)
 
+
+md(r"""
+## 16. Final model: live demo and results (presentation)
+**Final model** (docs/modal.md): 256 px, trained on all In-shop photos. For your own photos the demo uses **v2** =
+warp `checkpoints/full_256/warp/generator_only.pt` + texture `checkpoints/v2_256/texture_ft/generator_only.pt`
+(copy both from `report/private/models/` on the PC into the same folders under the Drive project root).
+The reported W1 model additionally needs DensePose maps, which own photos do not have (0.0009 SSIM higher).
+
+Cells: (1) load the final models, (2) try on uploaded photos, (3) all metric tables recomputed from the saved per-pair
+scores, (4) optional live benchmark on a few standard pairs.
+""")
+code(r"""
+demo_models = demo_pre = demo_cfg = None
+if RUN_FINAL_DEMO or RUN_LIVE_BENCHMARK:
+    from src.config import load_config
+    from src.inference.pipeline import PreTreatment
+    from src.inference.tryon import load_tryon_models
+    FINAL_WARP = paths.checkpoints / "full_256" / "warp" / "generator_only.pt"
+    FINAL_TEXTURE = paths.checkpoints / "v2_256" / "texture_ft" / "generator_only.pt"
+    missing = [str(f) for f in (FINAL_WARP, FINAL_TEXTURE) if not f.is_file()]
+    if missing:
+        raise FileNotFoundError("Copy the final weights to Drive first: " + ", ".join(missing))
+    demo_cfg = load_config("configs/modal_full_256.yaml", [f"paths.drive_root={paths.drive_root}",
+                                                           "segmentation.cache_outputs=false"])
+    demo_models = load_tryon_models(demo_cfg, warp=FINAL_WARP, texture=FINAL_TEXTURE)
+    demo_pre = PreTreatment(demo_cfg)
+    print("final models loaded:", demo_models.info, "| device", demo_models.device, "| size", demo_cfg.data.image_size)
+else:
+    print("Skipped (RUN_FINAL_DEMO=False).")
+""")
+code(r"""
+# LIVE TRY-ON. Run this cell, then upload 2 photos: the file that sorts FIRST by name is the reference (person WEARING
+# the garment), the second the target person, e.g. 1_reference.jpg and 2_target.jpg. Best: full body, front-facing,
+# one person, plain light background (like DeepFashion). Re-run the cell for each new pair.
+if RUN_FINAL_DEMO and IN_COLAB and demo_models is not None:
+    import io
+    import time as _time
+    from google.colab import files
+    from PIL import Image
+    from IPython.display import display
+    from src.data.preprocessing import load_image
+    from src.inference.pipeline import try_on
+    up = files.upload()
+    if len(up) < 2:
+        raise ValueError("Upload two images: reference and target.")
+    (rn, rb), (tn, tb_) = sorted(up.items())[:2]
+    print("reference:", rn, "| target:", tn)
+    ref_u, tgt_u = load_image(Image.open(io.BytesIO(rb))), load_image(Image.open(io.BytesIO(tb_)))
+    out_dir = paths.outputs / "final_demo" / f"{Path(rn).stem}__on__{Path(tn).stem}"
+    t0 = _time.time()
+    r = try_on(ref_u, tgt_u, demo_cfg, pretreatment=demo_pre, models=demo_models, save_dir=out_dir)
+    print(f"done in {_time.time() - t0:.1f} s; saved to {out_dir}")
+    display(Image.open(out_dir / "overview.png"))
+    print("columns: reference | C_seg (its garments) | target | B_seg (target body) | C'_seg (warped layout) | layout + "
+          "face/hair | warped texture I_S | generated | result (target face/hair pasted)")
+else:
+    print("Skipped (RUN_FINAL_DEMO=False, not in Colab, or models not loaded).")
+""")
+code(r"""
+# ALL METRICS, recomputed now from the per-pair scores saved when the models were evaluated on Modal
+# (report/data/results/*.json: one SSIM / LPIPS / L1 value per test pair). Means and paired 95% CIs are computed here.
+if RUN_SHOW_RESULTS:
+    from scripts.show_results import main as show_results
+    show_results([])
+else:
+    print("Skipped (RUN_SHOW_RESULTS=False).")
+""")
+code(r"""
+# LIVE BENCHMARK on LIVE_PAIRS standard DeepFashion test pairs (fully automatic, whole 176 x 256 image), using the
+# final split (report/data/results/splits_pack256.json) so that no pair of a training product is scored.
+# Needs FETCH_DFMM=True (photos), the pair lists (ALLOW_PAIR_DOWNLOAD=True once) and the metric weights on Drive.
+# FID on ~100 images is not meaningful (it needs thousands); SSIM / LPIPS are comparable with the full-run numbers.
+if RUN_LIVE_BENCHMARK and demo_models is not None:
+    from scripts.pose_transfer_benchmark import main as pt_main
+    from PIL import Image
+    from IPython.display import display
+    live_out = paths.outputs / "final_demo" / "live_benchmark"
+    args = ["--config", "configs/modal_full_256.yaml", "--drive-root", str(paths.drive_root),
+            "--image-dir", str(Path(cfg.data.root) / cfg.data.layout.images_dir), "--out", str(live_out),
+            "--limit", str(LIVE_PAIRS), "--override", "data.split_file=report/data/results/splits_pack256.json",
+            "--override", f"evaluation.warp_checkpoint={FINAL_WARP}",
+            "--override", f"evaluation.texture_checkpoint={FINAL_TEXTURE}",
+            "--override", "segmentation.cache_outputs=false"]
+    if ALLOW_PAIR_DOWNLOAD:
+        args.append("--allow-pair-download")
+    pt_main(args)
+    display(Image.open(live_out / "grid.png"))
+    print("grid columns: reference photo | real target (ground truth) | our output | our output + target face/hair")
+else:
+    print("Skipped (RUN_LIVE_BENCHMARK=False or models not loaded).")
+""")
 
 md(r"""
 ## 15. Secure the results (run before deleting the runtime)
