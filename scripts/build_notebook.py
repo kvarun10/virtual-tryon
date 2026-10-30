@@ -9,8 +9,25 @@ import nbformat as nbf
 
 out = sys.argv[1]
 cells = []
-md = lambda s: cells.append(nbf.v4.new_markdown_cell(s.strip("\n")))
-code = lambda s: cells.append(nbf.v4.new_code_cell(s.strip("\n")))
+_guard = {"on": False}  # code cells of Sections 6a-14 are skipped when DEMO_ONLY=True (set in Section 0)
+
+
+def md(s):
+    head = s.lstrip("\n")
+    if head.startswith("## 6a."):
+        _guard["on"] = True
+    if head.startswith("## 16."):
+        _guard["on"] = False
+    cells.append(nbf.v4.new_markdown_cell(s.strip("\n")))
+
+
+def code(s):
+    s = s.strip("\n")
+    if _guard["on"]:
+        body = "\n".join(("    " + l) if l.strip() else l for l in s.splitlines())
+        s = ('if globals().get("DEMO_ONLY"):\n    print("Skipped (DEMO_ONLY=True: only setup and Section 16 run).")\n'
+             'else:\n' + body)
+    cells.append(nbf.v4.new_code_cell(s))
 
 md(r"""
 # Dress-up virtual try-on — Colab notebook
@@ -97,6 +114,7 @@ PT_LIMIT = None                    # None = all scorable pairs; a number = quick
 RUN_INSHOP_INSPECTION = False
 INSHOP_DIR = "/content/drive/MyDrive/VirtualTryOn/datasets/In-shop Clothes Retrieval Benchmark"
 # --- Section 16: final model demo and results (presentation) ------------------------------------------------
+DEMO_ONLY = False                  # True: Run all does only the setup (Sections 0-5) and Section 16; no dataset needed
 RUN_FINAL_DEMO = False             # load the final 256 px models from Drive (checkpoints/full_256/warp, v2_256/texture_ft)
 RUN_SHOW_RESULTS = False           # print all metric tables, recomputed from report/data/results (no GPU, no data)
 RUN_LIVE_BENCHMARK = False         # score the final model live on LIVE_PAIRS standard pairs (needs FETCH_DFMM=True)
