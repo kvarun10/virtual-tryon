@@ -1,148 +1,201 @@
-# Dress-up virtual try-on (research implementation)
+# Dress-up Revisited: segmentation-guided virtual try-on
 
-A student research project that re-implements, as faithfully as the paper and available resources
-allow, the three-stage virtual try-on pipeline from
+A from-scratch PyTorch re-implementation and extension of **Dress-up** (Ghodhbani et al., *Multimedia Tools and
+Applications*, 2023), a three-stage GAN pipeline that dresses a person in the clothes of another person's image.
+The paper released no code, no weights and no evaluation protocol. This project rebuilds every stage, trains it on
+a total cloud budget of about **$47**, and scores it on the **standard DeepFashion pose-transfer benchmark** with the
+same scoring code used by the published state of the art.
 
-> H. Ghodhbani et al., **"Dress-up: deep neural framework for image-based human appearance transfer"**,
-> *Multimedia Tools and Applications* 82 (2023) 23151–23178 (`researchpaper.pdf`).
+**Final model (fully automatic, 7,954 standard test pairs, whole image):**
+**SSIM 0.7015 · LPIPS 0.2010 · FID 12.83**: above PATN, ADGAN, PISE and SPGNet, level with DPTN, within about
+0.015 SSIM of NTED (GAN, 2022) and 0.036 SSIM of CFLD (diffusion, 2024).
 
-No official Dress-up code or weights exist. Every component is either re-implemented, replaced by
-a documented pretrained substitute, or not yet implemented. See `docs/implementation_deviations.md`.
+## How it works
 
-## Current status: warp trained (baseline); texture trained briefly (2k steps); end-to-end try-on implemented
+```mermaid
+flowchart LR
+    R[Reference image<br/>person wearing the clothes] --> P1[SCHP-LIP<br/>clothing parser]
+    T[Target image<br/>person in the new pose] --> P2[SCHP-Pascal body parser<br/>+ DensePose body parts]
+    P1 --> C[Clothing map]
+    P2 --> B[Body map]
+    C --> W[Stage B: garment warp<br/>dual-path U-Net, CE + LSGAN]
+    B --> W
+    W --> L[Clothing layout in the new pose<br/>+ target face and hair]
+    L --> X[Stage C: texture network<br/>dense correspondence + SPADE]
+    R -. colours and patterns .-> X
+    X --> O[Result]
+```
 
-| Stage | What it does | Status |
+1. **Pre-treatment (Stage A).** Pretrained human parsers turn the reference image into a garment label map and the
+   target image into a body-part map.
+2. **Garment warp (Stage B).** A dual-path U-Net redraws the garment *label map* in the target's pose. Predicting a
+   layout is much easier than predicting pixels.
+3. **Texture (Stage C).** A CoCosNet-style correspondence finds, for every position of the new layout, the matching
+   position in the reference image, and a SPADE generator paints the final image. The target's own face and hair labels
+   are kept so that identity is preserved.
+
+## Results
+
+### Try-on on new images
+
+Images that were never part of the training data. Columns: **reference** (clothes to transfer) · **target**
+(person to dress) · **result**.
+
+<img src="docs/images/demo_tryon.png" width="560" alt="Try-on results: reference, target, result">
+
+* **Bottom:** the black T-shirt replaces the target's maroon one, while the target's face, jeans and pose are kept.
+* **Top:** the checked shirt's pattern and the jacket shape transfer, but the pattern also spills onto the trousers. This
+  is a typical failure: when the garment layout is uncertain, texture leaks into the wrong garment (see *Where the error
+  comes from* below).
+
+Every stage of the pipeline for these two examples (reference · its clothing map · target · its body map · predicted
+layout · layout with the target's face and hair · warped texture · generated image · result):
+
+![Pipeline stages, example 1](docs/images/demo_stages_1.png)
+![Pipeline stages, example 2](docs/images/demo_stages_2.png)
+
+These were produced by the demo variant of the final model (256 px warp + fine-tuned texture), which needs no
+DensePose maps and therefore runs on any image.
+
+### Model progression (standard benchmark)
+
+| Model | Pairs | SSIM ↑ | LPIPS ↓ | L1 ↓ | FID ↓ |
+|---|---|---|---|---|---|
+| Copy the reference image (trivial baseline) | 7,954 | 0.514 | 0.463 | 0.158 | – |
+| 128 px baseline (Colab T4) | 1,570* | 0.631 | 0.396 | 0.091 | – |
+| 256 px, all 52,712 In-shop images | 7,990 | 0.699 | 0.205 | 0.068 | 13.64 |
+| + texture fine-tune (pixel L1 + contextual loss) | 7,990 | 0.701 | 0.204 | 0.067 | 13.14 |
+| **+ DensePose-augmented warp (final)** | 7,954 | **0.703** | **0.201** | **0.066** | **12.83** |
+
+\*The baseline could only be scored on the pairs whose products it never trained on. Every step was confirmed on
+identical pairs with paired bootstrap 95 % confidence intervals (all exclude zero).
+
+![Model progression](docs/images/progression.png)
+
+### Comparison with published methods
+
+Re-scored on one protocol by CFLD (CVPR 2024), DeepFashion 256 × 176; ours scored with the same SSIM code.
+
+| Method | Type | SSIM ↑ | LPIPS ↓ |
+|---|---|---|---|
+| PATN (2019) | GAN | 0.671 | 0.253 |
+| ADGAN (2020) | GAN | 0.674 | 0.226 |
+| PISE (2021) | GAN | 0.654 | 0.224 |
+| SPGNet (2021) | GAN | 0.697 | 0.226 |
+| DPTN (2022) | GAN | 0.698 | 0.209 |
+| **Ours (final)** | **GAN** | **0.702** | **0.201** |
+| GFLA (2020) | GAN | 0.708 | 0.188 |
+| NTED (2022) | GAN | 0.716 | 0.177 |
+| CASD (2022) | GAN | 0.722 | 0.178 |
+| PIDM (2023) | Diffusion | 0.711 | 0.169 |
+| PoCoLD (2023) | Diffusion | 0.731 | 0.164 |
+| CFLD (2024) | Diffusion | 0.738 | 0.152 |
+
+Our model never saw a benchmark test product during training (the published methods trained on the standard
+split, in which 439 of the 811 test products also occur). Our FID uses the real target images as the reference set,
+so it is only roughly comparable with the published FIDs; rank by SSIM and LPIPS.
+
+<img src="docs/images/sota_scatter.png" width="620" alt="SSIM vs LPIPS of published methods and ours">
+
+### Where the error comes from
+
+Replacing automatic components by ground truth on validation try-ons shows that the **garment warp is the
+bottleneck**: a perfect parser adds +0.005 SSIM, a perfect layout another +0.038.
+
+| Setting (318 validation pairs) | SSIM ↑ | LPIPS ↓ |
 |---|---|---|
-| A. Pre-treatment | reference photo → clothing map **C_seg**; target photo → body-part map **B_seg** | ✅ implemented (pretrained SCHP parsers, DFMM annotations) |
-| B. Warp | dual-path U-Net: C_seg + B_seg → garment layout on the target body **C'_seg** | 🧪 implemented and tested; **real-data training not run yet** |
-| C. Texture | correspondence alignment + SPADE generator → final image **I_G** | 🧪 implemented and tested; **real-data training not run yet** |
-| Garment-only references (product photos) | not in the paper | 🧪 experimental preprocessing only |
+| Fully automatic | 0.774 | 0.167 |
+| + manual garment labels (perfect parser) | 0.779 | 0.161 |
+| + true target layout (perfect warp) | **0.817** | **0.122** |
 
-**There is no try-on output yet.** `try_on()` runs Stage A and then stops with an explicit
-`StageNotAvailableError`. It never returns a fake result.
+<img src="docs/images/ablation_forest.png" width="760" alt="Ablation of the 256 px extensions">
 
-## How the paper works (short version)
+**Note on the paper's numbers.** Dress-up reports SSIM 0.95, but does not publish its test pairs, crop, resolution or
+metric settings, and treats LPIPS as "higher is better". On the standard benchmark no published method, including
+the 2024 diffusion models, exceeds about 0.74 SSIM, so the 0.95 could not be reproduced or compared.
 
-1. **Pre-treatment:** human parsers turn both photos into label maps. Labels carry layout but no texture.
-2. **Warp:** a network redraws the reference's *clothing label map* in the target's pose. Predicting a
-   label map is easier than predicting pixels.
-3. **Texture:** for every location of the new layout, find the matching location in the reference photo
-   (feature correlation + softmax), build a roughly aligned "style image", and let a SPADE generator
-   render the final photo from it.
+## What differs from the paper
 
-Details, equations and open questions: `docs/paper_analysis.md`.
+| | Dress-up paper | This implementation |
+|---|---|---|
+| Parsers | JPPNet and NBF (TensorFlow 1; NBF needs SMPL) | SCHP (LIP, Pascal-Person-Part) ported to pure PyTorch; DensePose body parts |
+| Warp | dual-path U-Net, CE + adversarial | same, plus body-encoder skips, LSGAN PatchGAN, cross-view training triplets, and (final) body maps of both people |
+| Texture | correspondence + SPADE, hinge loss only | CoCosNet loss set, layout-conditioned SPADE, fine-tune with pixel L1 + contextual loss |
+| Evaluation | protocol not given | standard PATN pairs, common protocol code, product-disjoint splits, paired CIs |
 
-## Pretrained inference vs training
-
-* **Pretrained components** (used as-is): the SCHP human parsers for Stage A.
-* **Must be trained by this project:** the warp network and the texture networks. No compatible
-  pretrained weights exist. Results from our training will **not** reproduce the paper's numbers (the paper used ≥4 GPUs and an undocumented protocol).
+All 25 deviations and their reasons: [docs/implementation_deviations.md](docs/implementation_deviations.md).
 
 ## Quick start
 
-### Local CPU smoke test (no downloads)
-
 ```bash
-pip install -r requirements-dev.txt
-```
-```bash
-python -m pytest
-```
-```bash
-python scripts/prepare_dataset.py --config configs/colab_smoke_test.yaml
+pip install -r requirements-dev.txt     # plus torch/torchvision (>= 2.1) for your platform
+python -m pytest                        # 174 tests, CPU only, synthetic data fixture
+python scripts/show_results.py          # recompute every result table from the saved per-pair scores
 ```
 
-The smoke test uses a **synthetic cartoon fixture** that mimics the dataset layout. It tests the
-code paths only; never report metrics from it.
-
-### Google Colab
-
-1. Put the code where Colab can reach it: push this repository to GitHub (private is fine), **or**
-   zip the project folder as `virtual-tryon.zip` and upload it to `MyDrive/VirtualTryOn/code/`.
-2. Open `notebooks/virtual_try_on_colab.ipynb` in Colab (File → Upload notebook, or open it from GitHub).
-3. Runtime → Change runtime type → **GPU** (T4 is enough for Phase 3; CPU works for the dry run).
-4. Edit the **Settings** cell: `REPO_URL` (or leave it empty when using the zip), `DRY_RUN`, `ALLOW_WEIGHT_DOWNLOAD`.
-5. Run all cells. With `DRY_RUN=True` everything runs on the synthetic fixture.
-6. For real data: download the dataset (below), set `DRY_RUN=False`, and run again.
-
-**Connecting Drive:** Section 3 calls `drive.mount()`, which asks for authorisation. Storage layout:
-`docs/data.md`. No secrets or tokens are stored anywhere in the project.
-
-### Dataset paths
-
-Default: `<drive_root>/datasets/DeepFashion-MultiModal`. Change it with `data.root` in a config or
-an override such as `EXTRA_OVERRIDES = ["data.root=/content/dfmm"]`. If the unzipped folder names
-differ, set `data.layout.images_dir` / `parsing_dir` / `densepose_dir`. `scripts/prepare_dataset.py --inspect` shows what is there.
-
-### Pretrained weights (SCHP)
-
-| key | file | labels | size |
-|---|---|---|---|
-| `schp_lip` | exp-schp-201908261155-lip.pth | 20 LIP | ~255 MiB |
-| `schp_atr` | exp-schp-201908301523-atr.pth | 18 ATR | ~255 MiB |
-| `schp_pascal` | exp-schp-201908270938-pascal-person-part.pth | 7 body parts | ~255 MiB |
-
-Source: https://github.com/PeikeLi/Self-Correction-Human-Parsing (MIT). Either set
-`segmentation.allow_weight_download=true` (uses `gdown`; a `.provenance.json` with SHA-256 is written
-next to the file) or copy the files to `<drive_root>/pretrained/schp/` yourself. Then verify:
+**Try on your own images** (needs trained weights, see below). Use full-body, front-facing images on a plain background:
 
 ```bash
-python scripts/verify_schp_checkpoint.py --weights schp_lip --checkpoint /content/drive/MyDrive/VirtualTryOn/pretrained/schp/exp-schp-201908261155-lip.pth --images a.jpg b.jpg
+python scripts/tryon.py --config configs/modal_full_256.yaml --reference ref.jpg --target target.jpg \
+  --warp path/to/warp/generator_only.pt --texture path/to/texture/generator_only.pt
 ```
 
-## Configuration
+**Colab demo:** open [notebooks/virtual_try_on_colab.ipynb](notebooks/virtual_try_on_colab.ipynb), set
+`DEMO_ONLY = True` in Section 0 and run all. Section 16 loads the final models, runs a live try-on on uploaded
+images and prints every metric table.
 
-`src/config.py` defines every option with its default. YAML files in `configs/` override them:
+**Training and benchmarking at 256 px** (Modal cloud, detached jobs that survive the PC disconnecting):
 
-| file | purpose |
-|---|---|
-| `colab_smoke_test.yaml` | synthetic fixture, CPU, no downloads |
-| `colab_baseline.yaml` | Mode B: DFMM, 128 px, single GPU |
-| `extended_training.yaml` | Mode C: 256 px (inherits the baseline via `_base_`) |
+```bash
+modal run --detach modal_app.py::train --stage warp --max-steps 60000 --gpu L40S --cpu 12 --which w1_256
+modal run --detach modal_app.py::train --stage texture --max-steps 50000 --gpu H100 --which full_256
+modal run --detach modal_app.py::benchmark --which w1_256
+```
 
-Overrides: `load_config(path, ["data.image_size=[256,256]", "training.batch_size=2"])`. Unknown keys are errors.
+The full run record (GPU choice, costs, every result): [docs/modal.md](docs/modal.md).
 
-## Training, resuming, inference and evaluation
+## Repository layout
 
-* **Training the warp stage:** notebook Sections 8–10, or `python scripts/precompute_body_maps.py --config configs/colab_baseline.yaml` once, then `python -m src.training.train_warp --config configs/colab_baseline.yaml --max-steps 2000`. Re-running the same command resumes from `checkpoints/<experiment>/warp/last.pt`. Texture stage: notebook Sections 9–10b, or `python -m src.training.train_texture --config configs/colab_baseline.yaml --override training.allow_vgg_download=true --max-steps 2000`.
-* **Inference:** `try_on(reference, target, cfg, stop_after="pretreatment")` returns C_seg and B_seg.
-* **Evaluation now:** `evaluate_clothing_parser()` measures a parser against DFMM's manual parsing (pixel
-  accuracy and mIoU in `garment12`, background excluded from mIoU). Image metrics (SSIM, LPIPS, FID) come in Phase 7.
+```
+src/data/          datasets, label sets, splits, packed In-shop store, DensePose maps, augmentation
+src/models/        SCHP port, warp network, texture network (correspondence + SPADE), discriminators
+src/training/      trainers (EMA, resume, fine-tune), losses (incl. contextual loss)
+src/inference/     pre-treatment and end-to-end try-on
+src/evaluation/    SSIM / LPIPS / FID / KID, pose-transfer benchmark, layout eval, paired bootstrap CIs
+scripts/           try-on CLI, benchmark, results tables, data tools
+configs/           128 px baseline, 256 px runs (full_256, v2_256, w1_256), experiments
+modal_app.py       cloud training / benchmark jobs
+notebooks/         Colab notebook (training, evaluation, live demo)
+docs/              design notes, experiments, evaluation protocol, results
+report/data/       per-pair benchmark scores behind every number above
+```
 
-## GPU and storage requirements
+## Data and weights
 
-* Phase 3: SCHP inference fits easily on a T4 (the model is 66.7M parameters). CPU works but is slow (seconds per image).
-* DFMM: about 11 GB for images + DensePose, about 90 MB for parsing. The free Drive tier is 15 GB; see `docs/data.md`.
+* **Data:** DeepFashion In-shop and DeepFashion-MultiModal (non-commercial research use only). They are **not**
+  included in this repository; download them from the official sources after accepting their licences.
+* **Pretrained parsers:** SCHP weights (MIT) from the
+  [official repository](https://github.com/PeikeLi/Self-Correction-Human-Parsing).
+* **Trained weights:** not distributed, because they are derived from DeepFashion. Train them with the commands above.
 
-## Common errors
+## Project report
 
-| Error | Meaning / fix |
-|---|---|
-| `DatasetUnavailableError` | dataset folder missing; the message lists the download steps |
-| `FileNotFoundError ... images_dir` | folder names differ; run `--inspect` and set `data.layout.*` |
-| `WeightsUnavailableError` | weights missing; allow the download or copy the file |
-| `CheckpointMismatchError` | wrong or corrupted file, or a label-set mismatch (e.g. LIP weights with an ATR backend) |
-| `LabelError ... colour-coded` | an RGB visualisation PNG was loaded instead of the raw label PNG |
-| `LabelError ... cannot produce body15` | `schp_pascal` gives 7 parts; set `labels.body_label_set=pascal_person_part` |
-| `SplitError ... fingerprint` | the image set changed; delete the old split file to regenerate it |
-| `StageNotAvailableError` | warp/texture not implemented yet (expected in Phase 3) |
-| `GPUUnavailableError` | select a GPU runtime or use `experiment.device=auto` |
+The full project report (method, experiments, ablations and analysis):
+[docs/report/Virtual_TryOn_Project_Report_Final.pdf](docs/report/Virtual_TryOn_Project_Report_Final.pdf).
 
-## Known limitations
+## Team
 
-* Parsers and body model are substitutes (SCHP instead of LIP-JppNet, DensePose/SCHP-PPP instead of NBF).
-* The real SCHP checkpoints and the real dataset have not been run yet (see `docs/implementation_status.md`).
-* DFMM has no product photos, so garment-only mode cannot be trained on it (`docs/clothing_only_mode.md`).
-* The paper's evaluation protocol is undocumented; its numbers are kept only as published references.
+- Varun Kaushal
+- Vaidehi Patel
+- Smit Thakkar
+- Sayali Chaudhari
 
-## Licences
+Department of Computer Science and Engineering<br>
+Motilal Nehru National Institute of Technology Allahabad<br>
+Prayagraj, India
 
-Code in this repository: your choice (not yet set). Third-party pieces: SCHP architecture port (MIT,
-© 2020 Peike Li; affine helper MIT © Microsoft). Data and weights are **not** redistributed:
-DeepFashion / DeepFashion-MultiModal are non-commercial research only; VITON-HD is CC BY-NC 4.0;
-SegFormer weights fall under the NVIDIA SegFormer licence (non-commercial).
+## Reference
 
-## Documentation
-
-`docs/paper_analysis.md` (paper audit + Phase 2–3 update) · `docs/architecture.md` · `docs/data.md` ·
-`docs/implementation_deviations.md` · `docs/implementation_status.md` · `docs/clothing_only_mode.md`
+H. Ghodhbani, M. Neji, A. M. Qahtani, O. Almutiry, H. Dhahri, A. M. Alimi, "Dress-up: deep neural framework for
+image-based human appearance transfer," *Multimedia Tools and Applications* 82, 23151–23178 (2023).
+doi:[10.1007/s11042-022-14127-w](https://doi.org/10.1007/s11042-022-14127-w)
