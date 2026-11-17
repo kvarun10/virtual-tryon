@@ -141,7 +141,7 @@ python scripts/tryon.py --config configs/modal_full_256.yaml --reference ref.jpg
 ```
 
 **Colab demo:** open [notebooks/virtual_try_on_colab.ipynb](notebooks/virtual_try_on_colab.ipynb), set
-`DEMO_ONLY = True` in Section 0 and run all. Section 16 loads the final models, runs a live try-on on uploaded
+`DEMO_ONLY = True` in Section 0 and run all. Section 18 loads the final models, runs a live try-on on uploaded
 images and prints every metric table.
 
 **Training and benchmarking at 256 px** (Modal cloud, detached jobs that survive the PC disconnecting):
